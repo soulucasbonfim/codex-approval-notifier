@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SOURCE_NOTIFIER="${CODEX_ALERT_SOURCE_NOTIFIER:-${SCRIPT_DIR}/codex-approval-notifier.sh}"
 INSTALL_DIR="${CODEX_ALERT_INSTALL_DIR:-${HOME}/.local/bin}"
 INSTALL_NAME="${CODEX_ALERT_INSTALL_NAME:-codex-approval-notifier}"

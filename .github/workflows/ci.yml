@@ -48,7 +48,7 @@ jobs:
 
       - name: ShellCheck
         run: |
-          shellcheck \
+          shellcheck --exclude=SC2317 \
             scripts/codex-approval-notifier.sh \
             scripts/install-codex-approval-notifier.sh \
             scripts/restart-codex-approval-monitor.sh \

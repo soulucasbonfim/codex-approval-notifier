@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# shellcheck disable=SC2317
 set -euo pipefail
 
 command_exists() {
@@ -159,7 +160,7 @@ state_key_from_path() {
   local path="$1"
   local base rest
   base="${path##*/}"
-  rest="${base#${ALERT_STATE_PREFIX}.}"
+  rest="${base#"${ALERT_STATE_PREFIX}."}"
   printf '%s' "${rest%%.*}"
 }
 

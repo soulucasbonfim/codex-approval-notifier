@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(CDPATH='' cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 NOTIFIER="${CODEX_ALERT_TEST_NOTIFIER:-${SCRIPT_DIR}/codex-approval-notifier.sh}"
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/codex-approval-smoke.XXXXXX")"
 TEST_LOG="${TMP_ROOT}/backend.log"
