@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.2 - 2026-04-26
+
+- Start TUI log cleanup monitoring at the current end of `codex-tui.log`.
+- Prevent delayed approval cleanup caused by replaying old Codex log history.
+
 ## 1.0.1 - 2026-04-26
 
 - Replace persistent `tail -F` TUI log monitoring with offset-based polling.

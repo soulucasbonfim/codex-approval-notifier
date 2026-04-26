@@ -249,6 +249,19 @@ assert_log_not_contains() {
   fi
 }
 
+wait_for_no_pending() {
+  local state_dir="$1"
+  local attempts=0
+  while (( attempts < 40 )); do
+    if ! find "$state_dir" -maxdepth 1 -name 'codex-approval.*.pending' -print -quit 2>/dev/null | grep -q .; then
+      return 0
+    fi
+    attempts=$((attempts + 1))
+    sleep 0.1
+  done
+  return 1
+}
+
 run_real_prompt_case() {
   local name="$1"
   local platform="$2"
@@ -283,6 +296,30 @@ run_auto_approved_case() {
   assert_log_not_contains 'paplay'
   stop_notifier
   pass "auto-approved command stays silent"
+}
+
+run_tui_monitor_starts_at_eof_case() {
+  local case_dir="${TMP_ROOT}/tui-starts-at-eof"
+  local tui_log="${case_dir}/codex-tui.log"
+  local sound_file="${case_dir}/sound.oga"
+  local state_dir="${case_dir}/state"
+  mkdir -p "$case_dir"
+  : >"$sound_file"
+  append_exec_approval_line "$tui_log"
+  append_progress_line "$tui_log"
+
+  start_notifier linux "$state_dir" "$tui_log" "$sound_file"
+  sleep 0.5
+  if [[ -f "${state_dir}/codex-approval.events.log" ]] && grep -Eq 'exec_approval|clear_thread_pending_on_progress' "${state_dir}/codex-approval.events.log"; then
+    fail "TUI monitor reprocessed historical log lines at startup"
+  fi
+
+  send_permission_request_hook linux "$state_dir" "$tui_log" "$sound_file"
+  assert_log_contains 'notify-send'
+  append_exec_approval_line "$tui_log"
+  wait_for_no_pending "$state_dir" || fail "new exec approval did not clear pending alert"
+  stop_notifier
+  pass "TUI monitor starts at EOF and still clears new approvals"
 }
 
 run_model_noise_does_not_suppress_prompt_case() {
@@ -471,6 +508,7 @@ run_real_prompt_case "macos osascript fallback" darwin 'osascript ' 'afplay ' en
 run_real_prompt_case "linux notify-send backend" linux 'notify-send ' 'paplay '
 run_real_prompt_case "linux zenity fallback" linux 'zenity ' 'paplay ' env FAKE_NOTIFY_SEND_FAIL=1
 run_auto_approved_case
+run_tui_monitor_starts_at_eof_case
 run_model_noise_does_not_suppress_prompt_case
 run_self_status_clear_case
 run_private_log_case

@@ -6,7 +6,7 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
-CODEX_APPROVAL_NOTIFIER_VERSION="1.0.1"
+CODEX_APPROVAL_NOTIFIER_VERSION="1.0.2"
 
 need_cmd() {
   command_exists "$1" || {
@@ -1739,6 +1739,12 @@ monitor_tui_log() {
   local size delta line
   TUI_LAST_EXEC_APPROVAL_GROUP=""
   TUI_LAST_EXEC_APPROVAL_EPOCH=0
+  if [[ -f "$CODEX_TUI_LOG_FILE" ]]; then
+    size="$(wc -c <"$CODEX_TUI_LOG_FILE" 2>/dev/null | tr -d '[:space:]' || true)"
+    if [[ "$size" =~ ^[0-9]+$ ]]; then
+      offset="$size"
+    fi
+  fi
 
   while true; do
     if [[ -f "$CODEX_TUI_LOG_FILE" ]]; then
