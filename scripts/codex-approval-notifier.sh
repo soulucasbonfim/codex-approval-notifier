@@ -733,8 +733,8 @@ doctor() {
   fi
   snapshot="$(process_snapshot)"
   printf '\nprocesses:\n'
-  print_process_count "notifier wrappers" 'codex-approval-notifier(\.sh)?([[:space:]]|$)' "$snapshot"
-  print_process_count "tui log tails" 'tail -n0 -F .*/\.codex/log/codex-tui\.log' "$snapshot"
+  print_process_count "notifier wrappers" 'codex-approval-notifier([.]sh)?([[:space:]]|$)' "$snapshot"
+  print_process_count "tui log tails" 'tail -n0 -F .*/[.]codex/log/codex-tui[.]log' "$snapshot"
   return "$exit_code"
 }
 

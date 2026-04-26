@@ -35,9 +35,9 @@ collect_pids() {
 
   printf '%s\n' "$ps_out" | awk -v self="$$" '
     $1 == self {next}
-    /codex-approval-notifier(\.sh)?([[:space:]]|$)/ {print $1}
-    /tail -n0 -F .*\/\.codex\/log\/codex-tui\.log/ {print $1}
-    /tail -n0 -F .*\/codex-approval-notifier\/[^ ]+\/codex-approval\.events\.log/ {print $1}
+    /codex-approval-notifier([.]sh)?([[:space:]]|$)/ {print $1}
+    /tail -n0 -F .*\/[.]codex\/log\/codex-tui[.]log/ {print $1}
+    /tail -n0 -F .*\/codex-approval-notifier\/[^ ]+\/codex-approval[.]events[.]log/ {print $1}
   ' | awk 'NF {print $1}' | sort -u
 }
 
