@@ -31,11 +31,17 @@ Linux package hints:
 - Fedora: `sudo dnf install libnotify pulseaudio-utils libcanberra-gtk3 alsa-utils zenity`
 - Arch: `sudo pacman -S libnotify libpulse libcanberra alsa-utils zenity`
 
+macOS package hint:
+
+- Optional preferred notifier: `brew install terminal-notifier`
+
 Only one visual notification backend is required. Sound is optional and can be disabled with `CODEX_ALERT_PLAY_SOUND=0`.
 
-## Install
+## Quick Start
 
 ```bash
+git clone https://github.com/soulucasbonfim/codex-approval-notifier.git
+cd codex-approval-notifier
 ./install.sh
 ```
 
@@ -58,10 +64,18 @@ source ~/.bashrc
 
 If you use another shell, set `CODEX_ALERT_SHELL_RC` to a zsh/bash-compatible rc file or install the wrapper manually.
 
+Start a new Codex session after installing so Codex loads the managed shell wrapper and hook configuration.
+
 Validate the installation:
 
 ```bash
 codex-approval-notifier --doctor
+```
+
+If `--doctor` reports a missing hook, run:
+
+```bash
+codex-approval-notifier --install-hook
 ```
 
 To bypass the notifier for one command:
@@ -111,6 +125,8 @@ source ~/.zshrc
 # bash
 source ~/.bashrc
 ```
+
+Start a new terminal session after uninstalling so the managed shell wrapper is no longer active.
 
 ## Diagnostics
 
