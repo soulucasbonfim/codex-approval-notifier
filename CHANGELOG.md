@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1 - 2026-04-26
+
+- Replace persistent `tail -F` TUI log monitoring with offset-based polling.
+- Fix noisy shutdown diagnostics such as `Killed: 9` after exiting Codex.
+- Keep stale `tail -F` detection in diagnostics for cleanup of older notifier processes.
+
 ## 1.0.0 - 2026-04-26
 
 - Initial public-ready release.

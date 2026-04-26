@@ -6,7 +6,7 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
-CODEX_APPROVAL_NOTIFIER_VERSION="1.0.0"
+CODEX_APPROVAL_NOTIFIER_VERSION="1.0.1"
 
 need_cmd() {
   command_exists "$1" || {
@@ -734,7 +734,7 @@ doctor() {
   snapshot="$(process_snapshot)"
   printf '\nprocesses:\n'
   print_process_count "notifier wrappers" 'codex-approval-notifier([.]sh)?([[:space:]]|$)' "$snapshot"
-  print_process_count "tui log tails" 'tail -n0 -F .*/[.]codex/log/codex-tui[.]log' "$snapshot"
+  print_process_count "stale tui tails" 'tail -n0 -F .*/[.]codex/log/codex-tui[.]log' "$snapshot"
   return "$exit_code"
 }
 
@@ -1697,47 +1697,68 @@ hook_permission_request_command() {
   return 0
 }
 
+process_tui_log_line() {
+  local line="$1"
+  local thread_id thread_group line_is_progress
+  line_is_progress=0
+  thread_id="$(printf '%s' "$line" | sed -nE 's/.*thread_id=([0-9a-f-]+).*/\1/p' | head -n1)"
+  if [[ -n "$thread_id" ]]; then
+    thread_group="${ALERT_TOAST_GROUP}-${thread_id}"
+  else
+    thread_group="$ALERT_TOAST_GROUP"
+  fi
+
+  if tui_line_indicates_command_progress "$line"; then
+    line_is_progress=1
+    set_progress_state "$thread_group"
+  fi
+
+  if [[ "$line" == *'codex.op="exec_approval"'* ]] || [[ "$line" == *'op.dispatch.exec_approval'* ]]; then
+    local exec_now
+    exec_now="$(date +%s)"
+    if [[ "$thread_group" != "$TUI_LAST_EXEC_APPROVAL_GROUP" ]] || (( exec_now - TUI_LAST_EXEC_APPROVAL_EPOCH > 1 )); then
+      append_event_log "monitor_tui_log: exec_approval group=${thread_group}"
+      TUI_LAST_EXEC_APPROVAL_GROUP="$thread_group"
+      TUI_LAST_EXEC_APPROVAL_EPOCH="$exec_now"
+    fi
+    clear_alerts_for_thread_group "$thread_group"
+    if [[ "$thread_group" != "$ALERT_TOAST_GROUP" ]]; then
+      clear_pending_alert "$ALERT_TOAST_GROUP"
+    fi
+    return 0
+  fi
+
+  if [[ "$line_is_progress" == "1" ]]; then
+    append_event_log "monitor_tui_log: clear_thread_pending_on_progress group=${thread_group}"
+    clear_alerts_for_thread_group "$thread_group"
+  fi
+}
+
 monitor_tui_log() {
-  local last_exec_approval_group=""
-  local last_exec_approval_epoch=0
+  local offset=0
+  local size delta line
+  TUI_LAST_EXEC_APPROVAL_GROUP=""
+  TUI_LAST_EXEC_APPROVAL_EPOCH=0
 
   while true; do
-    tail -n0 -F "$CODEX_TUI_LOG_FILE" 2>/dev/null | while IFS= read -r line; do
-      local thread_id thread_group line_is_progress
-      line_is_progress=0
-      thread_id="$(printf '%s' "$line" | sed -nE 's/.*thread_id=([0-9a-f-]+).*/\1/p' | head -n1)"
-      if [[ -n "$thread_id" ]]; then
-        thread_group="${ALERT_TOAST_GROUP}-${thread_id}"
-      else
-        thread_group="$ALERT_TOAST_GROUP"
-      fi
-
-      if tui_line_indicates_command_progress "$line"; then
-        line_is_progress=1
-        set_progress_state "$thread_group"
-      fi
-
-      if [[ "$line" == *'codex.op="exec_approval"'* ]] || [[ "$line" == *'op.dispatch.exec_approval'* ]]; then
-        local exec_now
-        exec_now="$(date +%s)"
-        if [[ "$thread_group" != "$last_exec_approval_group" ]] || (( exec_now - last_exec_approval_epoch > 1 )); then
-          append_event_log "monitor_tui_log: exec_approval group=${thread_group}"
-          last_exec_approval_group="$thread_group"
-          last_exec_approval_epoch="$exec_now"
+    if [[ -f "$CODEX_TUI_LOG_FILE" ]]; then
+      size="$(wc -c <"$CODEX_TUI_LOG_FILE" 2>/dev/null | tr -d '[:space:]' || true)"
+      if [[ "$size" =~ ^[0-9]+$ ]]; then
+        if (( size < offset )); then
+          offset=0
         fi
-        clear_alerts_for_thread_group "$thread_group"
-        if [[ "$thread_group" != "$ALERT_TOAST_GROUP" ]]; then
-          clear_pending_alert "$ALERT_TOAST_GROUP"
+        if (( size > offset )); then
+          delta=$((size - offset))
+          while IFS= read -r line || [[ -n "$line" ]]; do
+            process_tui_log_line "$line"
+          done < <(dd if="$CODEX_TUI_LOG_FILE" bs=1 skip="$offset" count="$delta" 2>/dev/null)
+          offset="$size"
         fi
-        continue
       fi
-
-      if [[ "$line_is_progress" == "1" ]]; then
-        append_event_log "monitor_tui_log: clear_thread_pending_on_progress group=${thread_group}"
-        clear_alerts_for_thread_group "$thread_group"
-      fi
-    done
-    sleep 0.5
+    else
+      offset=0
+    fi
+    sleep "$ALERT_LOOP_TICK_SECONDS"
   done
 }
 
@@ -1765,9 +1786,8 @@ cleanup() {
 }
 
 run_monitor_process() {
-  # Background monitor functions own descendants such as tail -F. They must
-  # clean those descendants themselves so the parent shell does not print
-  # "Terminated" job diagnostics when Codex exits.
+  # Background monitors must clean short-lived descendants themselves so the
+  # parent shell does not print job diagnostics when Codex exits.
   set +e
   trap 'set +e; terminate_child_tree "${BASHPID:-$$}"; exit 0' INT TERM
   trap 'set +e; terminate_child_tree "${BASHPID:-$$}"' EXIT
@@ -1787,20 +1807,11 @@ stop_monitor_processes() {
     kill -TERM "$pid" >/dev/null 2>&1 || true
   done
 
-  sleep 0.1
-
-  for pid in "${MONITOR_PIDS[@]:-}"; do
-    [[ -n "$pid" ]] || continue
-    terminate_child_tree "$pid"
-    if kill -0 "$pid" >/dev/null 2>&1; then
-      kill -KILL "$pid" >/dev/null 2>&1 || true
-    fi
-  done
-
   for pid in "${MONITOR_PIDS[@]:-}"; do
     [[ -n "$pid" ]] || continue
     wait "$pid" 2>/dev/null || true
   done
+  MONITOR_PIDS=()
 }
 
 handle_signal() {
