@@ -4,7 +4,9 @@
 
 Desktop notification and sound reminder for Codex approval prompts.
 
-`1.0.0` is the first public-ready version. The notifier uses Codex's `PermissionRequest` hook as the primary approval signal, then watches Codex's TUI log (`~/.codex/log/codex-tui.log`) only to clear stale alerts when the approval/command flow advances. This avoids pseudo-terminal rendering issues and avoids heuristic false positives from normal command logs.
+Current release: `1.0.2`.
+
+The notifier uses Codex's `PermissionRequest` hook as the primary approval signal, then watches Codex's TUI log (`~/.codex/log/codex-tui.log`) only to clear stale alerts when the approval/command flow advances. This avoids pseudo-terminal rendering issues and avoids heuristic false positives from normal command logs.
 
 License: MIT. See `LICENSE`.
 
