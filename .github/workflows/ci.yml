@@ -1,0 +1,66 @@
+name: codex-approval-notifier
+
+on:
+  push:
+    paths:
+      - "scripts/codex-approval-*.sh"
+      - "scripts/*codex-approval-notifier*.sh"
+      - "scripts/restart-codex-approval-monitor.sh"
+      - "install.sh"
+      - "uninstall.sh"
+      - "README.md"
+      - "LICENSE"
+      - ".github/workflows/ci.yml"
+  pull_request:
+    paths:
+      - "scripts/codex-approval-*.sh"
+      - "scripts/*codex-approval-notifier*.sh"
+      - "scripts/restart-codex-approval-monitor.sh"
+      - "install.sh"
+      - "uninstall.sh"
+      - "README.md"
+      - "LICENSE"
+      - ".github/workflows/ci.yml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install lint tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Bash syntax
+        run: |
+          bash -n \
+            scripts/codex-approval-notifier.sh \
+            scripts/install-codex-approval-notifier.sh \
+            scripts/restart-codex-approval-monitor.sh \
+            scripts/uninstall-codex-approval-notifier.sh \
+            scripts/test-codex-approval-notifier.sh \
+            install.sh \
+            uninstall.sh
+
+      - name: ShellCheck
+        run: |
+          shellcheck \
+            scripts/codex-approval-notifier.sh \
+            scripts/install-codex-approval-notifier.sh \
+            scripts/restart-codex-approval-monitor.sh \
+            scripts/uninstall-codex-approval-notifier.sh \
+            scripts/test-codex-approval-notifier.sh \
+            install.sh \
+            uninstall.sh
+
+      - name: Smoke test
+        run: |
+          scripts/test-codex-approval-notifier.sh
+
+      - name: Restart script dry-run
+        run: |
+          scripts/restart-codex-approval-monitor.sh --dry-run

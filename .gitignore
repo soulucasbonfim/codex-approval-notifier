@@ -1,0 +1,8 @@
+.DS_Store
+*.log
+*.out
+*.pid
+*.tmp
+coverage.out
+.env
+.env.*
