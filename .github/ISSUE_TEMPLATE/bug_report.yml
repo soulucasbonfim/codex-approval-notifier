@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a reproducible problem with Codex Approval Notifier.
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please include enough detail to reproduce the issue.
+  - type: input
+    id: os
+    attributes:
+      label: Operating system
+      description: Example: macOS 15, Ubuntu 24.04, Fedora 40.
+    validations:
+      required: true
+  - type: input
+    id: shell
+    attributes:
+      label: Shell
+      description: Example: zsh, bash.
+    validations:
+      required: true
+  - type: input
+    id: codex-version
+    attributes:
+      label: Codex CLI version
+      description: Run `codex --version` if available.
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Doctor output
+      description: Run `codex-approval-notifier --doctor` and paste the output.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: List the exact steps that trigger the problem.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
