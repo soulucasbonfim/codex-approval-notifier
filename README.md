@@ -37,7 +37,6 @@ Only one visual notification backend is required. Sound is optional and can be d
 
 ```bash
 ./install.sh
-source ~/.zshrc
 ```
 
 The installer:
@@ -47,7 +46,23 @@ The installer:
 - Enables `codex_hooks` and adds a managed `PermissionRequest` hook to `~/.codex/config.toml`.
 - Creates a backup of the shell rc before editing it.
 
-Automatic shell wrapper installation supports zsh and bash. For fish or other shells, install the wrapper manually or set `CODEX_ALERT_SHELL_RC` to a zsh/bash rc file.
+Automatic shell wrapper installation supports zsh and bash. After installing, open a new terminal or reload your shell rc:
+
+```bash
+# zsh
+source ~/.zshrc
+
+# bash
+source ~/.bashrc
+```
+
+If you use another shell, set `CODEX_ALERT_SHELL_RC` to a zsh/bash-compatible rc file or install the wrapper manually.
+
+Validate the installation:
+
+```bash
+codex-approval-notifier --doctor
+```
 
 To bypass the notifier for one command:
 
@@ -85,7 +100,16 @@ The TUI log monitor remains active only for cleanup:
 
 ```bash
 ./uninstall.sh
+```
+
+Then open a new terminal or reload your shell rc:
+
+```bash
+# zsh
 source ~/.zshrc
+
+# bash
+source ~/.bashrc
 ```
 
 ## Diagnostics
