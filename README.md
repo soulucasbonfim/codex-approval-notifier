@@ -4,7 +4,7 @@
 
 Desktop notification and sound reminder for Codex approval prompts.
 
-Current release: `1.0.2`.
+Current release: `1.0.3`.
 
 The notifier uses Codex's `PermissionRequest` hook as the primary approval signal, then watches Codex's TUI log (`~/.codex/log/codex-tui.log`) only to clear stale alerts when the approval/command flow advances. This avoids pseudo-terminal rendering issues and avoids heuristic false positives from normal command logs.
 
@@ -21,12 +21,14 @@ Notification backends:
 
 - macOS preferred: `terminal-notifier`.
 - macOS fallback: built-in `osascript display notification`.
+- WSL: Windows toast through PowerShell/WinRT, with Windows Forms fallback.
 - Linux preferred: `notify-send`.
 - Linux fallback: `zenity`, then `kdialog`.
 
 Sound backends:
 
 - macOS: `afplay`, then terminal bell.
+- WSL: Windows sound through PowerShell.
 - Linux: `paplay`, then `canberra-gtk-play`, then `aplay`, then terminal bell.
 
 Linux package hints:
@@ -54,6 +56,7 @@ The installer:
 - Copies `codex-approval-notifier.sh` to `${HOME}/.local/bin/codex-approval-notifier`.
 - Adds a managed `codex()` shell wrapper to `~/.zshrc` or `~/.bashrc`.
 - Enables `codex_hooks` and adds a managed `PermissionRequest` hook to `~/.codex/config.toml`.
+- On WSL, installs the Windows toast AppUserModelID when WinRT is available.
 - Creates a backup of the shell rc before editing it.
 
 Automatic shell wrapper installation supports zsh and bash. After installing, open a new terminal or reload your shell rc:
@@ -155,6 +158,8 @@ codex-approval-notifier --backend-test
 codex-approval-notifier --clear
 codex-approval-notifier --install-hook
 codex-approval-notifier --uninstall-hook
+codex-approval-notifier --install-windows-toast
+codex-approval-notifier --uninstall-windows-toast
 codex-approval-notifier --tail-events
 ```
 
@@ -164,6 +169,8 @@ codex-approval-notifier --tail-events
 - `--clear`: clears pending notifier state without killing Codex.
 - `--install-hook`: installs the managed `PermissionRequest` hook in `~/.codex/config.toml`.
 - `--uninstall-hook`: removes the managed hook block.
+- `--install-windows-toast`: installs the WSL Windows toast AppUserModelID shortcut.
+- `--uninstall-windows-toast`: removes the WSL Windows toast shortcut.
 - `--tail-events`: follows the notifier troubleshooting log.
 
 ## Reset Monitor
@@ -212,13 +219,14 @@ It covers:
 | Event | Toast | Sound | Reason |
 | --- | --- | --- | --- |
 | Real Codex approval prompt | Yes | Yes | Codex emitted a `PermissionRequest` hook. |
+| WSL pending prompt remains unapproved | No repeat toast | Initial sound, then repeats every 5 seconds until timeout | Windows toasts stay single-shot while reminders continue. |
 | Auto-approved command after "yes forever" | No | No | No `PermissionRequest` hook is emitted because Codex continues without asking. |
 | Normal sandboxed command | No | No | No approval path. |
 | Multiple prompts in parallel | One grouped alert per thread | Independent reminder state per thread | Avoids cross-session suppression. |
 | Original monitor-owner session exits | Existing live session takes over reminders | Continues alerting pending prompts | Prevents alert loss in multi-session usage. |
 | Click macOS notification Show with `terminal-notifier` | Reminders silence for that pending prompt | Stops repeats | The click writes an ack flag. |
 
-Linux notification click callbacks are not portable across notification daemons. The notifier still repeats sound/toast until Codex clears the pending approval or the pending timeout expires.
+Linux notification click callbacks are not portable across notification daemons. The notifier still repeats sound/toast until Codex clears the pending approval or the pending timeout expires. On WSL, only sound repeats after the initial Windows toast.
 
 ## Files Created
 
@@ -235,7 +243,7 @@ Important files:
 - `codex-approval.<group-hash>.pending`: pending approval state for one Codex thread/group.
 - `codex-approval.<group-hash>.ack`: notification click acknowledgement for one pending prompt.
 - `codex-approval.<group-hash>.notify_id`: Linux notification id when `notify-send --print-id` is available.
-- `codex-approval.<group-hash>.message`, `.last_sound`, `.last_toast`: small per-thread reminder state files rewritten in place.
+- `codex-approval.<group-hash>.message`, `.last_sound`, `.last_toast`, `.next_sound`, `.next_toast`: small per-thread reminder state files rewritten in place.
 
 Each open Codex session runs a lightweight supervisor. Exactly one supervisor owns reminder scheduling at a time. If that session exits while other Codex sessions remain open, another supervisor claims ownership automatically.
 
@@ -276,6 +284,14 @@ export CODEX_ALERT_ORPHAN_LOCK_GRACE_SECONDS=1
 export CODEX_ALERT_REMOVE_TOAST_TIMEOUT_SECONDS=1
 export CODEX_ALERT_REPEAT_SOUND_SECONDS=5
 export CODEX_ALERT_REPEAT_TOAST_SECONDS=30
+```
+
+WSL Windows options:
+
+```bash
+export CODEX_ALERT_WINDOWS_APP_ID=Codex
+export CODEX_ALERT_WINDOWS_SHORTCUT_NAME='Codex Approval Notifier.lnk'
+export CODEX_ALERT_WINDOWS_SOUND_FILE='C:\Windows\Media\Speech On.wav'
 ```
 
 macOS advanced option:

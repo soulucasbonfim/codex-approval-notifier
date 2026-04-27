@@ -34,7 +34,10 @@ collect_pids() {
   fi
 
   printf '%s\n' "$ps_out" | awk -v self="$$" '
+    $1 == 1 {next}
     $1 == self {next}
+    /codex-linux-sandbox/ {next}
+    /restart-codex-approval-monitor[.]sh/ {next}
     /codex-approval-notifier([.]sh)?([[:space:]]|$)/ {print $1}
     /tail -n0 -F .*\/[.]codex\/log\/codex-tui[.]log/ {print $1}
     /tail -n0 -F .*\/codex-approval-notifier\/[^ ]+\/codex-approval[.]events[.]log/ {print $1}
@@ -90,9 +93,9 @@ cleanup_state_dir() {
     [[ -n "$path" ]] && dirs+=("$path")
   done < <(state_dirs_for "$dir" "$prefix")
 
-  shopt -s nullglob
-  files+=("${dir}/${prefix}."*)
-  shopt -u nullglob
+  while IFS= read -r path; do
+    [[ -n "$path" ]] && files+=("$path")
+  done < <(find "$dir" -maxdepth 1 -type f -name "${prefix}.*" -print 2>/dev/null || true)
 
   if ((${#files[@]} > 0)); then
     run_or_echo rm -f "${files[@]}" || true

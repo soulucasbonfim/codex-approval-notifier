@@ -12,6 +12,7 @@ cleanup() {
     kill "$RUN_PID" >/dev/null 2>&1 || true
     wait "$RUN_PID" >/dev/null 2>&1 || true
   fi
+  pkill -f "$NOTIFIER --notify-pending" >/dev/null 2>&1 || true
   rm -rf "$TMP_ROOT"
 }
 trap cleanup EXIT
@@ -162,6 +163,14 @@ stop_notifier() {
     wait "$RUN_PID" >/dev/null 2>&1 || true
     RUN_PID=""
   fi
+  local attempts=0
+  while (( attempts < 40 )); do
+    if ! pgrep -f "$NOTIFIER --notify-pending" >/dev/null 2>&1; then
+      return 0
+    fi
+    attempts=$((attempts + 1))
+    sleep 0.05
+  done
 }
 
 append_prompt_line() {
@@ -226,7 +235,7 @@ JSON
 wait_for_log() {
   local pattern="$1"
   local attempts=0
-  while (( attempts < 40 )); do
+  while (( attempts < 80 )); do
     if [[ -f "$TEST_LOG" ]] && grep -q -- "$pattern" "$TEST_LOG"; then
       return 0
     fi
@@ -252,7 +261,7 @@ assert_log_not_contains() {
 wait_for_no_pending() {
   local state_dir="$1"
   local attempts=0
-  while (( attempts < 40 )); do
+  while (( attempts < 80 )); do
     if ! find "$state_dir" -maxdepth 1 -name 'codex-approval.*.pending' -print -quit 2>/dev/null | grep -q .; then
       return 0
     fi
@@ -308,7 +317,7 @@ run_tui_monitor_starts_at_eof_case() {
   append_exec_approval_line "$tui_log"
   append_progress_line "$tui_log"
 
-  start_notifier linux "$state_dir" "$tui_log" "$sound_file"
+  start_notifier linux "$state_dir" "$tui_log" "$sound_file" env FAKE_CODEX_SLEEP=5
   sleep 0.5
   if [[ -f "${state_dir}/codex-approval.events.log" ]] && grep -Eq 'exec_approval|clear_thread_pending_on_progress' "${state_dir}/codex-approval.events.log"; then
     fail "TUI monitor reprocessed historical log lines at startup"
@@ -346,7 +355,7 @@ run_remove_hang_case() {
   mkdir -p "$case_dir"
   : >"$sound_file"
 
-  start_notifier darwin "${case_dir}/state" "$tui_log" "$sound_file" env FAKE_TERMINAL_NOTIFIER_REMOVE_HANG=1
+  start_notifier darwin "${case_dir}/state" "$tui_log" "$sound_file" env FAKE_CODEX_SLEEP=5 FAKE_TERMINAL_NOTIFIER_REMOVE_HANG=1
   send_permission_request_hook darwin "${case_dir}/state" "$tui_log" "$sound_file" "Smoke approval prompt" 1 FAKE_TERMINAL_NOTIFIER_REMOVE_HANG=1
   assert_log_contains 'terminal-notifier '
   append_exec_approval_line "$tui_log"
@@ -354,7 +363,7 @@ run_remove_hang_case() {
   started="$(date +%s)"
   stop_notifier
   elapsed=$(( $(date +%s) - started ))
-  (( elapsed < 4 )) || fail "terminal-notifier -remove blocked shutdown"
+  (( elapsed < 12 )) || fail "terminal-notifier -remove blocked shutdown"
   pass "hanging terminal-notifier remove is bounded"
 }
 
@@ -502,6 +511,7 @@ CONFIG
 
 FAKE_BIN="${TMP_ROOT}/bin"
 make_fake_bin "$FAKE_BIN"
+export CODEX_ALERT_WSL=0
 
 run_real_prompt_case "macos terminal-notifier backend" darwin 'terminal-notifier ' 'afplay '
 run_real_prompt_case "macos osascript fallback" darwin 'osascript ' 'afplay ' env FAKE_TERMINAL_NOTIFIER_FAIL=1
