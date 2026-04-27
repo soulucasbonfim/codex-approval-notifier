@@ -14,6 +14,16 @@ log() {
   printf '[codex-alert-install] %s\n' "$*"
 }
 
+is_wsl() {
+  if [[ "${CODEX_ALERT_WSL:-}" == "1" ]]; then
+    return 0
+  fi
+  if [[ "${CODEX_ALERT_WSL:-}" == "0" ]]; then
+    return 1
+  fi
+  grep -qiE '(microsoft|wsl)' /proc/version 2>/dev/null
+}
+
 detect_shell_rc() {
   if [[ -n "${CODEX_ALERT_SHELL_RC:-}" ]]; then
     printf '%s' "$CODEX_ALERT_SHELL_RC"
@@ -101,6 +111,15 @@ main() {
   remove_managed_block "$shell_rc"
   append_managed_block "$shell_rc"
   log "updated shell rc: $shell_rc"
+
+  if is_wsl; then
+    if "$TARGET" --install-windows-toast >/dev/null 2>&1; then
+      log "installed Windows WinRT toast app id"
+    else
+      log "Windows WinRT toast app id unavailable; using Windows notification fallback"
+    fi
+  fi
+
   CODEX_CONFIG_FILE="$CODEX_CONFIG" CODEX_ALERT_INSTALLED_PATH="$TARGET" "$TARGET" --install-hook
   log "open a new terminal or run: source \"$shell_rc\""
 }

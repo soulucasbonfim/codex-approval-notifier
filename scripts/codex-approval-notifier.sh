@@ -60,6 +60,11 @@ ALERT_NOTIFY_CATEGORY="${CODEX_ALERT_NOTIFY_CATEGORY:-im.received}"
 ALERT_BACKEND_TIMEOUT_SECONDS="${CODEX_ALERT_BACKEND_TIMEOUT_SECONDS:-2}"
 ALERT_LOG_MESSAGES="${CODEX_ALERT_LOG_MESSAGES:-1}"
 ALERT_HOOK_PERMISSION_REQUEST_ENABLED="${CODEX_ALERT_HOOK_PERMISSION_REQUEST_ENABLED:-1}"
+ALERT_WINDOWS_APP_ID="${CODEX_ALERT_WINDOWS_APP_ID:-Codex}"
+ALERT_WINDOWS_SHORTCUT_NAME="${CODEX_ALERT_WINDOWS_SHORTCUT_NAME:-Codex Approval Notifier.lnk}"
+ALERT_WINDOWS_NOTIFYICON_FALLBACK="${CODEX_ALERT_WINDOWS_NOTIFYICON_FALLBACK:-1}"
+ALERT_WINDOWS_SOUND_ALIAS="${CODEX_ALERT_WINDOWS_SOUND_ALIAS:-SystemNotification}"
+ALERT_WINDOWS_SOUND_FILE="${CODEX_ALERT_WINDOWS_SOUND_FILE:-C:\\Windows\\Media\\Speech On.wav}"
 CODEX_TUI_LOG_FILE="${CODEX_TUI_LOG_FILE:-$HOME/.codex/log/codex-tui.log}"
 CODEX_CONFIG_FILE="${CODEX_CONFIG_FILE:-$HOME/.codex/config.toml}"
 ALERT_STATE_BASE_DIR="${TMPDIR:-/tmp}"
@@ -223,6 +228,8 @@ clear_all_group_state() {
         "$ALERT_STATE_DIR"/"${ALERT_STATE_PREFIX}."*.last_event_key \
         "$ALERT_STATE_DIR"/"${ALERT_STATE_PREFIX}."*.last_sound \
         "$ALERT_STATE_DIR"/"${ALERT_STATE_PREFIX}."*.last_toast \
+        "$ALERT_STATE_DIR"/"${ALERT_STATE_PREFIX}."*.next_sound \
+        "$ALERT_STATE_DIR"/"${ALERT_STATE_PREFIX}."*.next_toast \
         "$ALERT_STATE_DIR"/"${ALERT_STATE_PREFIX}."*.notify_id \
         >/dev/null 2>&1 || true
   shopt -u nullglob
@@ -385,6 +392,17 @@ notify_send_supports() {
   cmd_help_contains notify-send "$feature"
 }
 
+is_wsl() {
+  local release version
+  case "${CODEX_ALERT_WSL:-}" in
+    1|true|yes) return 0 ;;
+    0|false|no) return 1 ;;
+  esac
+  release="$(cat /proc/sys/kernel/osrelease 2>/dev/null || true)"
+  version="$(cat /proc/version 2>/dev/null || true)"
+  [[ "${release,,}" == *microsoft* || "${release,,}" == *wsl* || "${version,,}" == *microsoft* || "${version,,}" == *wsl* ]]
+}
+
 resolve_notification_backend() {
   if [[ "$PLATFORM" == "darwin" ]]; then
     if command_exists terminal-notifier; then
@@ -396,6 +414,14 @@ resolve_notification_backend() {
       return 0
     fi
   else
+    if is_wsl; then
+      if command_exists powershell.exe && command_exists iconv && command_exists base64; then
+        printf 'windows-toast'
+      else
+        printf 'none'
+      fi
+      return 0
+    fi
     if command_exists notify-send; then
       printf 'notify-send'
       return 0
@@ -417,6 +443,10 @@ resolve_sound_backend() {
     printf 'disabled'
     return 0
   }
+  if is_wsl && [[ "$(resolve_notification_backend)" == "windows-toast" ]]; then
+    printf 'windows-sound'
+    return 0
+  fi
   if [[ "$PLATFORM" == "darwin" ]]; then
     if command_exists afplay && [[ -f "$ALERT_SOUND_FILE" ]]; then
       printf 'afplay'
@@ -616,6 +646,9 @@ Usage:
   codex-approval-notifier.sh --clear
   codex-approval-notifier.sh --install-hook
   codex-approval-notifier.sh --uninstall-hook
+  codex-approval-notifier.sh --install-windows-toast
+  codex-approval-notifier.sh --uninstall-windows-toast
+  codex-approval-notifier.sh --start-monitor
   codex-approval-notifier.sh --tail-events
   codex-approval-notifier.sh --version
   codex-approval-notifier.sh --help
@@ -627,6 +660,8 @@ Environment:
   CODEX_ALERT_BACKEND_TIMEOUT_SECONDS     Default: 2
   CODEX_ALERT_LOG_MESSAGES=0|1           Default: 1
   CODEX_ALERT_HOOK_PERMISSION_REQUEST_ENABLED=0|1  Default: 1
+  CODEX_ALERT_WINDOWS_APP_ID=id        Default: Codex
+  CODEX_ALERT_WINDOWS_SHORTCUT_NAME=name.lnk
   CODEX_ALERT_PROGRESS_SUPPRESS_SECONDS  Default: 0.5
   CODEX_ALERT_OWNER_CHECK_SECONDS         Default: 1
 EOF
@@ -658,6 +693,12 @@ doctor() {
   printf 'remove_toast_timeout_seconds: %s\n' "$ALERT_REMOVE_TOAST_TIMEOUT_SECONDS"
   printf 'notification_backend: %s\n' "$notification_backend"
   printf 'sound_backend: %s\n' "$sound_backend"
+  if is_wsl; then
+    printf 'windows_app_id: %s\n' "$ALERT_WINDOWS_APP_ID"
+    printf 'windows_shortcut: %s\n' "$(windows_toast_shortcut_ps_path || true)"
+    printf 'windows_sound_alias: %s\n' "$ALERT_WINDOWS_SOUND_ALIAS"
+    printf 'windows_sound_file: %s\n' "$ALERT_WINDOWS_SOUND_FILE"
+  fi
   printf '\ncommands:\n'
   print_cmd_status "$CODEX_BIN"
   print_cmd_status tail
@@ -675,6 +716,9 @@ doctor() {
     print_cmd_status notify-send
     print_cmd_status zenity
     print_cmd_status kdialog
+    print_cmd_status powershell.exe
+    print_cmd_status iconv
+    print_cmd_status base64
     print_cmd_status paplay
     print_cmd_status aplay
     print_cmd_status canberra-gtk-play
@@ -694,6 +738,16 @@ doctor() {
     exit_code=1
   else
     printf '  %-22s ok (%s)\n' "notification" "$notification_backend"
+    if is_wsl; then
+      ensure_windows_toast_installed >/dev/null 2>&1 || true
+      if windows_toast_shortcut_exists; then
+        printf '  %-22s ok (%s)\n' "windows app id" "$ALERT_WINDOWS_APP_ID"
+      elif windows_toast_app_installed; then
+        printf '  %-22s available, shortcut auto-install failed\n' "windows app id"
+      else
+        printf '  %-22s unavailable; using NotifyIcon fallback\n' "windows app id"
+      fi
+    fi
   fi
   if [[ "$ALERT_PLAY_SOUND" == "1" ]]; then
     if [[ "$sound_backend" == "terminal-bell" ]]; then
@@ -833,6 +887,9 @@ sound_backend_check() {
     aplay)
       command_exists aplay && [[ -f "$ALERT_SOUND_FILE" ]] && run_with_timeout "$ALERT_BACKEND_TIMEOUT_SECONDS" aplay -q "$ALERT_SOUND_FILE"
       ;;
+    windows-sound)
+      command_exists powershell.exe && run_with_timeout "$ALERT_BACKEND_TIMEOUT_SECONDS" powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "\$sound = '${ALERT_WINDOWS_SOUND_FILE//\'/\'\'}'; Add-Type -MemberDefinition '[DllImport(\"winmm.dll\", SetLastError=true)] public static extern bool PlaySound(string pszSound, System.IntPtr hmod, uint fdwSound);' -Name WinMM -Namespace CodexApprovalNotifier; [CodexApprovalNotifier.WinMM]::PlaySound(\$sound, [IntPtr]::Zero, 0x00020000) | Out-Null"
+      ;;
     terminal-bell)
       printf '\a' >/dev/tty 2>/dev/null || true
       ;;
@@ -840,6 +897,10 @@ sound_backend_check() {
       return 1
       ;;
   esac
+}
+
+windows_toast_backend_check() {
+  is_wsl && command_exists powershell.exe && command_exists iconv && command_exists base64
 }
 
 backend_test_command() {
@@ -861,20 +922,29 @@ backend_test_command() {
       backend_skip osascript missing
     fi
   else
-    if command_exists notify-send; then
-      backend_check notify-send send_linux_notify_send "$message: notify-send" "$group-notify-send" || failures=$((failures + 1))
+    if is_wsl; then
+      if windows_toast_backend_check; then
+        backend_check windows-toast send_windows_toast "$message: windows-toast" "$group-windows-toast" || failures=$((failures + 1))
+      else
+        backend_skip windows-toast unavailable
+        failures=$((failures + 1))
+      fi
     else
-      backend_skip notify-send missing
-    fi
-    if command_exists zenity; then
-      backend_check zenity send_linux_zenity "$message: zenity" "$group-zenity" || failures=$((failures + 1))
-    else
-      backend_skip zenity missing
-    fi
-    if command_exists kdialog; then
-      backend_check kdialog send_linux_kdialog "$message: kdialog" "$group-kdialog" || failures=$((failures + 1))
-    else
-      backend_skip kdialog missing
+      if command_exists notify-send; then
+        backend_check notify-send send_linux_notify_send "$message: notify-send" "$group-notify-send" || failures=$((failures + 1))
+      else
+        backend_skip notify-send missing
+      fi
+      if command_exists zenity; then
+        backend_check zenity send_linux_zenity "$message: zenity" "$group-zenity" || failures=$((failures + 1))
+      else
+        backend_skip zenity missing
+      fi
+      if command_exists kdialog; then
+        backend_check kdialog send_linux_kdialog "$message: kdialog" "$group-kdialog" || failures=$((failures + 1))
+      else
+        backend_skip kdialog missing
+      fi
     fi
   fi
 
@@ -887,22 +957,26 @@ backend_test_command() {
     fi
     backend_check terminal-bell sound_backend_check terminal-bell || failures=$((failures + 1))
   else
-    if command_exists paplay && [[ -f "$ALERT_SOUND_FILE" ]]; then
-      backend_check paplay sound_backend_check paplay || failures=$((failures + 1))
+    if is_wsl && [[ "$(resolve_sound_backend)" == "windows-sound" ]]; then
+      backend_check windows-sound sound_backend_check windows-sound || failures=$((failures + 1))
     else
-      backend_skip paplay "missing command or sound file"
+      if command_exists paplay && [[ -f "$ALERT_SOUND_FILE" ]]; then
+        backend_check paplay sound_backend_check paplay || failures=$((failures + 1))
+      else
+        backend_skip paplay "missing command or sound file"
+      fi
+      if command_exists canberra-gtk-play; then
+        backend_check canberra-gtk-play sound_backend_check canberra-gtk-play || failures=$((failures + 1))
+      else
+        backend_skip canberra-gtk-play missing
+      fi
+      if command_exists aplay && [[ -f "$ALERT_SOUND_FILE" ]]; then
+        backend_check aplay sound_backend_check aplay || failures=$((failures + 1))
+      else
+        backend_skip aplay "missing command or sound file"
+      fi
+      backend_check terminal-bell sound_backend_check terminal-bell || failures=$((failures + 1))
     fi
-    if command_exists canberra-gtk-play; then
-      backend_check canberra-gtk-play sound_backend_check canberra-gtk-play || failures=$((failures + 1))
-    else
-      backend_skip canberra-gtk-play missing
-    fi
-    if command_exists aplay && [[ -f "$ALERT_SOUND_FILE" ]]; then
-      backend_check aplay sound_backend_check aplay || failures=$((failures + 1))
-    else
-      backend_skip aplay "missing command or sound file"
-    fi
-    backend_check terminal-bell sound_backend_check terminal-bell || failures=$((failures + 1))
   fi
 
   append_event_log "backend_test: failures=${failures}"
@@ -1019,7 +1093,12 @@ read_unix_ts() {
 }
 
 now_highres_ts() {
-  perl -MTime::HiRes=time -e 'printf "%.6f", time'
+  perl -MTime::HiRes=clock_gettime,CLOCK_MONOTONIC -e 'printf "%.6f", clock_gettime(CLOCK_MONOTONIC)'
+}
+
+now_interval_ts() {
+  perl -MTime::HiRes=clock_gettime,CLOCK_MONOTONIC -e 'printf "%d", clock_gettime(CLOCK_MONOTONIC)' 2>/dev/null ||
+    date +%s
 }
 
 read_highres_ts() {
@@ -1038,11 +1117,11 @@ read_highres_ts() {
 elapsed_since_ge() {
   local since_ts="$1"
   local threshold_seconds="$2"
-  perl -MTime::HiRes=time -e '
+  perl -MTime::HiRes=clock_gettime,CLOCK_MONOTONIC -e '
     my ($since, $threshold) = @ARGV;
     $since = 0 unless defined $since && $since =~ /^[0-9]+(?:\.[0-9]+)?$/;
     $threshold = 0 unless defined $threshold && $threshold =~ /^[0-9]+(?:\.[0-9]+)?$/;
-    exit((time() - $since) >= $threshold ? 0 : 1);
+    exit((clock_gettime(CLOCK_MONOTONIC) - $since) >= $threshold ? 0 : 1);
   ' "$since_ts" "$threshold_seconds"
 }
 
@@ -1085,6 +1164,7 @@ run_detached_with_timeout() {
     set +e
     run_with_timeout "$ALERT_BACKEND_TIMEOUT_SECONDS" "$@"
   ) >/dev/null 2>&1 &
+  disown "$!" >/dev/null 2>&1 || true
 }
 
 capture_with_timeout() {
@@ -1198,6 +1278,7 @@ clear_alert_toast() {
       kill "$remove_pid" >/dev/null 2>&1 || true
       wait "$remove_pid" >/dev/null 2>&1 || true
     ) >/dev/null 2>&1 &
+    disown "$!" >/dev/null 2>&1 || true
   fi
 }
 
@@ -1280,6 +1361,9 @@ play_alert_sound() {
     aplay)
       run_detached_with_timeout aplay -q "$ALERT_SOUND_FILE"
       ;;
+    windows-sound)
+      run_detached_with_timeout powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "\$sound = '${ALERT_WINDOWS_SOUND_FILE//\'/\'\'}'; Add-Type -MemberDefinition '[DllImport(\"winmm.dll\", SetLastError=true)] public static extern bool PlaySound(string pszSound, System.IntPtr hmod, uint fdwSound);' -Name WinMM -Namespace CodexApprovalNotifier; [CodexApprovalNotifier.WinMM]::PlaySound(\$sound, [IntPtr]::Zero, 0x00020000) | Out-Null"
+      ;;
     terminal-bell)
       printf '\a' >/dev/tty 2>/dev/null || true
       ;;
@@ -1333,6 +1417,320 @@ send_macos_osascript() {
     run_with_timeout "$ALERT_BACKEND_TIMEOUT_SECONDS" osascript \
       -e "display notification \"${esc_body}\" with title \"${esc_title}\" subtitle \"${esc_subtitle}\""
   fi
+}
+
+ps_single_quote() {
+  local value="$1"
+  value="${value//$'\r'/ }"
+  value="${value//$'\n'/ }"
+  value="${value//\'/\'\'}"
+  printf "'%s'" "$value"
+}
+
+ps_encoded_command() {
+  iconv -f UTF-8 -t UTF-16LE | base64 -w 0
+}
+
+run_windows_powershell_hidden() {
+  local encoded="$1"
+  command_exists powershell.exe || return 1
+  run_with_timeout "$ALERT_BACKEND_TIMEOUT_SECONDS" powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand "$encoded"
+}
+
+run_windows_powershell_detached() {
+  local encoded="$1"
+  command_exists powershell.exe || return 1
+  powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -EncodedCommand "$encoded" >/dev/null 2>&1 &
+  disown "$!" 2>/dev/null || true
+  return 0
+}
+
+windows_toast_shortcut_ps_path() {
+  local shortcut_name
+  shortcut_name="$(ps_single_quote "$ALERT_WINDOWS_SHORTCUT_NAME")"
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "\$p = Join-Path ([Environment]::GetFolderPath('StartMenu')) ('Programs\\' + ${shortcut_name}); Write-Output \$p" 2>/dev/null | tr -d '\r' | head -n1
+}
+
+windows_toast_app_installed() {
+  is_wsl || return 1
+  command_exists powershell.exe || return 1
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType=WindowsRuntime] | Out-Null; [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType=WindowsRuntime] | Out-Null" >/dev/null 2>&1
+}
+
+windows_toast_shortcut_exists() {
+  is_wsl || return 1
+  command_exists powershell.exe || return 1
+  local shortcut_name
+  shortcut_name="$(ps_single_quote "$ALERT_WINDOWS_SHORTCUT_NAME")"
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "\$p = Join-Path ([Environment]::GetFolderPath('StartMenu')) ('Programs\\' + ${shortcut_name}); if (Test-Path -LiteralPath \$p) { exit 0 } else { exit 1 }" >/dev/null 2>&1
+}
+
+install_windows_toast_shortcut() {
+  local app_id shortcut_name script encoded
+  is_wsl || {
+    printf 'windows toast install is only available on WSL\n' >&2
+    return 1
+  }
+  command_exists powershell.exe || {
+    printf 'powershell.exe is required for windows toast install\n' >&2
+    return 1
+  }
+  command_exists iconv || return 1
+  command_exists base64 || return 1
+
+  app_id="$(ps_single_quote "$ALERT_WINDOWS_APP_ID")"
+  shortcut_name="$(ps_single_quote "$ALERT_WINDOWS_SHORTCUT_NAME")"
+  script="
+\$ErrorActionPreference = 'Stop'
+\$ProgressPreference = 'SilentlyContinue'
+\$source = @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace CodexApprovalNotifier {
+  [ComImport, Guid(\"00021401-0000-0000-C000-000000000046\")]
+  public class CShellLink {}
+
+  [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid(\"000214F9-0000-0000-C000-000000000046\")]
+  public interface IShellLinkW {
+    void GetPath([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszFile, int cchMaxPath, IntPtr pfd, uint fFlags);
+    void GetIDList(out IntPtr ppidl);
+    void SetIDList(IntPtr pidl);
+    void GetDescription([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszName, int cchMaxName);
+    void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string pszName);
+    void GetWorkingDirectory([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszDir, int cchMaxPath);
+    void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string pszDir);
+    void GetArguments([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszArgs, int cchMaxPath);
+    void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string pszArgs);
+    void GetHotkey(out short pwHotkey);
+    void SetHotkey(short wHotkey);
+    void GetShowCmd(out int piShowCmd);
+    void SetShowCmd(int iShowCmd);
+    void GetIconLocation([Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pszIconPath, int cchIconPath, out int piIcon);
+    void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string pszIconPath, int iIcon);
+    void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string pszPathRel, uint dwReserved);
+    void Resolve(IntPtr hwnd, uint fFlags);
+    void SetPath([MarshalAs(UnmanagedType.LPWStr)] string pszFile);
+  }
+
+  [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid(\"0000010b-0000-0000-C000-000000000046\")]
+  public interface IPersistFile {
+    void GetClassID(out Guid pClassID);
+    void IsDirty();
+    void Load([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, uint dwMode);
+    void Save([MarshalAs(UnmanagedType.LPWStr)] string pszFileName, bool fRemember);
+    void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string pszFileName);
+    void GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string ppszFileName);
+  }
+
+  [StructLayout(LayoutKind.Sequential, Pack = 4)]
+  public struct PropertyKey {
+    public Guid fmtid;
+    public uint pid;
+    public PropertyKey(Guid fmtid, uint pid) {
+      this.fmtid = fmtid;
+      this.pid = pid;
+    }
+  }
+
+  [StructLayout(LayoutKind.Sequential)]
+  public struct PropVariant {
+    public ushort vt;
+    public ushort wReserved1;
+    public ushort wReserved2;
+    public ushort wReserved3;
+    public IntPtr p;
+    public int p2;
+  }
+
+  [ComImport, InterfaceType(ComInterfaceType.InterfaceIsIUnknown), Guid(\"886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99\")]
+  public interface IPropertyStore {
+    void GetCount(out uint cProps);
+    void GetAt(uint iProp, out PropertyKey pkey);
+    void GetValue(ref PropertyKey key, out PropVariant pv);
+    void SetValue(ref PropertyKey key, ref PropVariant pv);
+    void Commit();
+  }
+
+  public static class Shortcut {
+    public static void Create(string path, string target, string arguments, string workingDirectory, string icon, string description, string appId) {
+      IShellLinkW link = (IShellLinkW)new CShellLink();
+      link.SetPath(target);
+      link.SetArguments(arguments);
+      link.SetWorkingDirectory(workingDirectory);
+      link.SetIconLocation(target, 0);
+      link.SetDescription(description);
+
+      IPropertyStore propertyStore = (IPropertyStore)link;
+      PropertyKey appUserModelId = new PropertyKey(new Guid(\"9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3\"), 5);
+      PropVariant pv = new PropVariant();
+      pv.vt = 31;
+      pv.p = Marshal.StringToCoTaskMemUni(appId);
+      try {
+        propertyStore.SetValue(ref appUserModelId, ref pv);
+        propertyStore.Commit();
+      } finally {
+        if (pv.p != IntPtr.Zero) Marshal.FreeCoTaskMem(pv.p);
+      }
+
+      IPersistFile file = (IPersistFile)link;
+      file.Save(path, true);
+    }
+  }
+}
+'@
+Add-Type -TypeDefinition \$source
+\$appId = ${app_id}
+\$shortcutName = ${shortcut_name}
+\$shortcutPath = Join-Path ([Environment]::GetFolderPath('StartMenu')) ('Programs\\' + \$shortcutName)
+\$shortcutDir = Split-Path -Parent \$shortcutPath
+New-Item -ItemType Directory -Force -Path \$shortcutDir | Out-Null
+\$target = Join-Path \$env:WINDIR 'System32\\WindowsPowerShell\\v1.0\\powershell.exe'
+[CodexApprovalNotifier.Shortcut]::Create(\$shortcutPath, \$target, '-NoProfile -WindowStyle Hidden', \$env:USERPROFILE, \$target, 'Codex Approval Notifier', \$appId)
+Write-Output \$shortcutPath
+"
+  encoded="$(printf '%s' "$script" | ps_encoded_command)"
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand "$encoded" | tr -d '\r'
+}
+
+ensure_windows_toast_installed() {
+  is_wsl || return 1
+  windows_toast_app_installed || return 1
+  windows_toast_shortcut_exists && return 0
+  install_windows_toast_shortcut >/dev/null 2>&1
+}
+
+install_windows_toast_command() {
+  local output
+  windows_toast_app_installed || {
+    printf 'windows toast WinRT APIs are not available in this PowerShell/Windows environment\n' >&2
+    return 1
+  }
+  output="$(install_windows_toast_shortcut)" || return $?
+  if [[ -n "$output" ]]; then
+    printf '%s\n' "$output"
+  fi
+}
+
+uninstall_windows_toast_command() {
+  local shortcut_name script encoded
+  is_wsl || {
+    printf 'windows toast uninstall is only available on WSL\n' >&2
+    return 1
+  }
+  command_exists powershell.exe || return 1
+  command_exists cmd.exe || return 1
+  command_exists iconv || return 1
+  command_exists base64 || return 1
+  shortcut_name="$(ps_single_quote "$ALERT_WINDOWS_SHORTCUT_NAME")"
+  script="
+\$shortcutPath = Join-Path ([Environment]::GetFolderPath('StartMenu')) ('Programs\\' + ${shortcut_name})
+if (Test-Path -LiteralPath \$shortcutPath) {
+  Remove-Item -LiteralPath \$shortcutPath -Force
+  Write-Output \$shortcutPath
+}
+"
+  encoded="$(printf '%s' "$script" | ps_encoded_command)"
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -EncodedCommand "$encoded" | tr -d '\r'
+}
+
+send_windows_winrt_toast() {
+  local alert_message="${1:-$ALERT_BODY}"
+  local app_id title subtitle text fallback script encoded
+
+  command_exists powershell.exe || return 1
+  command_exists iconv || return 1
+  command_exists base64 || return 1
+
+  app_id="$(ps_single_quote "$ALERT_WINDOWS_APP_ID")"
+  title="$(ps_single_quote "$ALERT_TITLE")"
+  subtitle="$(ps_single_quote "$ALERT_SUBTITLE")"
+  text="$(ps_single_quote "$alert_message")"
+  fallback="$(ps_single_quote "$ALERT_WINDOWS_NOTIFYICON_FALLBACK")"
+  script="
+\$appId = ${app_id}
+\$rawTitle = ${title}
+\$rawBody = (${subtitle} + ': ' + ${text})
+\$fallback = ${fallback}
+try {
+  \$ErrorActionPreference = 'Stop'
+  \$title = [Security.SecurityElement]::Escape(\$rawTitle)
+  \$body = [Security.SecurityElement]::Escape(\$rawBody)
+  [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+  [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
+  \$xml = @\"
+<toast>
+  <visual>
+    <binding template=\"ToastGeneric\">
+      <text>\$title</text>
+      <text>\$body</text>
+    </binding>
+  </visual>
+  <audio silent=\"true\"/>
+</toast>
+\"@
+  \$doc = [Windows.Data.Xml.Dom.XmlDocument]::new()
+  \$doc.LoadXml(\$xml)
+  \$toast = [Windows.UI.Notifications.ToastNotification]::new(\$doc)
+  [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier(\$appId).Show(\$toast)
+} catch {
+  if (\$fallback -ne '1') { throw }
+  Add-Type -AssemblyName System.Windows.Forms
+  Add-Type -AssemblyName System.Drawing
+  \$n = New-Object System.Windows.Forms.NotifyIcon
+  \$n.Icon = [System.Drawing.SystemIcons]::Information
+  \$n.Visible = \$true
+  \$n.BalloonTipTitle = \$rawTitle
+  \$n.BalloonTipText = \$rawBody
+  \$n.ShowBalloonTip(7000)
+  Start-Sleep -Seconds 8
+  \$n.Dispose()
+}
+"
+  encoded="$(printf '%s' "$script" | ps_encoded_command)"
+  run_windows_powershell_detached "$encoded"
+  return 0
+}
+
+send_windows_toast() {
+  local alert_message="${1:-$ALERT_BODY}"
+  local title subtitle text child_script launcher_script child_encoded launcher_encoded
+
+  is_wsl || return 1
+  command_exists powershell.exe || return 1
+  command_exists cmd.exe || return 1
+  command_exists iconv || return 1
+  command_exists base64 || return 1
+
+  if send_windows_winrt_toast "$alert_message"; then
+    return 0
+  fi
+  [[ "$ALERT_WINDOWS_NOTIFYICON_FALLBACK" == "1" ]] || return 1
+
+  title="$(ps_single_quote "$ALERT_TITLE")"
+  subtitle="$(ps_single_quote "$ALERT_SUBTITLE")"
+  text="$(ps_single_quote "$alert_message")"
+
+  child_script="
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+\$n = New-Object System.Windows.Forms.NotifyIcon
+\$n.Icon = [System.Drawing.SystemIcons]::Information
+\$n.Visible = \$true
+\$n.BalloonTipTitle = ${title}
+\$n.BalloonTipText = (${subtitle} + ': ' + ${text})
+\$n.ShowBalloonTip(7000)
+Start-Sleep -Seconds 8
+\$n.Dispose()
+"
+  child_encoded="$(printf '%s' "$child_script" | ps_encoded_command)"
+  launcher_script="
+Start-Process -WindowStyle Hidden powershell.exe -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','${child_encoded}')
+"
+  launcher_encoded="$(printf '%s' "$launcher_script" | ps_encoded_command)"
+  run_windows_powershell_hidden "$launcher_encoded"
+  return 0
 }
 
 send_linux_notify_send() {
@@ -1410,7 +1808,13 @@ send_alert_toast() {
       status="sent"
     fi
   else
-    if send_linux_notify_send "$alert_message" "$toast_group"; then
+    if send_windows_toast "$alert_message" "$toast_group"; then
+      backend="windows-toast"
+      status="sent"
+    elif is_wsl; then
+      backend="windows-toast"
+      status="failed"
+    elif send_linux_notify_send "$alert_message" "$toast_group"; then
       backend="notify-send"
       status="sent"
     elif send_linux_zenity "$alert_message" "$toast_group"; then
@@ -1429,6 +1833,11 @@ send_alert_toast() {
 notify_approval() {
   local alert_message="${1:-$ALERT_BODY}"
   local toast_group="${2:-$ALERT_TOAST_GROUP}"
+  if is_wsl && [[ "$(resolve_notification_backend)" == "windows-toast" ]]; then
+    send_alert_toast "$alert_message" "$toast_group"
+    play_alert_sound
+    return 0
+  fi
   play_alert_sound
   send_alert_toast "$alert_message" "$toast_group"
 }
@@ -1440,7 +1849,7 @@ start_pending_alert() {
   local should_notify=1
 
   key="$(hash_text "$message")"
-  now="$(date +%s)"
+  now="$(now_interval_ts)"
   previous_key=""
 
   if ! acquire_alert_lock; then
@@ -1466,18 +1875,26 @@ start_pending_alert() {
     should_notify=0
   fi
 
-  set_pending_state "$toast_group" 1
   set_pending_message "$toast_group" "$message"
   set_pending_since "$toast_group" "$now"
   clear_ack_state "$toast_group"
-  append_event_log "start_pending_alert: pending=1 group=${toast_group} notify=${should_notify} message=$(event_message_value "$message")"
 
   if [[ "$should_notify" == "1" ]]; then
     write_group_state "$toast_group" last_event "$now"
     write_group_state "$toast_group" last_event_key "$key"
-    # Set reminder timestamps first so the reminder loop cannot emit a duplicate.
-    write_group_state "$toast_group" last_sound "$now"
-    write_group_state "$toast_group" last_toast "$now"
+  fi
+
+  # Make reminder timestamps visible before the pending flag. The owner loop
+  # reads pending state without taking this lock, so publishing pending first
+  # can produce a second sound/toast immediately after the hook notification.
+  write_group_state "$toast_group" last_sound "$now"
+  write_group_state "$toast_group" last_toast "$now"
+  write_group_state "$toast_group" next_sound "$((now + ALERT_REPEAT_SOUND_SECONDS))"
+  write_group_state "$toast_group" next_toast "$((now + ALERT_REPEAT_TOAST_SECONDS))"
+  set_pending_state "$toast_group" 1
+  append_event_log "start_pending_alert: pending=1 group=${toast_group} notify=${should_notify} message=$(event_message_value "$message")"
+
+  if [[ "$should_notify" == "1" ]]; then
     notify_approval "$message" "$toast_group"
     append_event_log "start_pending_alert: notified group=${toast_group}"
   fi
@@ -1501,7 +1918,7 @@ clear_pending_alert() {
   fi
 
   set_pending_state "$request_group" 0
-  remove_group_state "$request_group" message pending ack pending_since last_event last_event_key last_sound last_toast notify_id
+  remove_group_state "$request_group" message pending ack pending_since last_event last_event_key last_sound last_toast next_sound next_toast notify_id
   clear_alert_toast "$request_group"
   cleanup_group_identity_if_idle "$request_group"
   append_event_log "clear_pending_alert: group=${request_group}"
@@ -1513,8 +1930,12 @@ OWNER_LAST_HOUSEKEEPING_TS=0
 reminder_tick() {
   local now
   local group
+  local repeat_toast_enabled=1
 
-  now="$(date +%s)"
+  now="$(now_interval_ts)"
+  if is_wsl && [[ "$(resolve_notification_backend)" == "windows-toast" ]]; then
+    repeat_toast_enabled=0
+  fi
   if (( ALERT_JANITOR_INTERVAL_SECONDS > 0 )) && (( now - OWNER_LAST_HOUSEKEEPING_TS >= ALERT_JANITOR_INTERVAL_SECONDS )); then
     perform_owner_housekeeping
     OWNER_LAST_HOUSEKEEPING_TS="$now"
@@ -1522,30 +1943,68 @@ reminder_tick() {
 
   while IFS= read -r group; do
     [[ -n "$group" ]] || continue
-    if (( ALERT_PENDING_TIMEOUT_SECONDS > 0 )); then
-      local pending_since
-      pending_since="$(get_pending_since "$group")"
-      if (( now - pending_since >= ALERT_PENDING_TIMEOUT_SECONDS )); then
-        clear_pending_alert "$group"
-        continue
-      fi
-    fi
-    if is_acknowledged "$group"; then
+    local pending_since next_sound next_toast message sound_due toast_due timeout_due
+    sound_due=0
+    toast_due=0
+    timeout_due=0
+
+    if ! acquire_alert_lock; then
+      append_event_log "reminder_tick: lock busy group=${group}"
       continue
     fi
-    local last_sound last_toast message
-    last_sound="$(read_unix_ts "$(group_state_file "$group" last_sound)")"
-    last_toast="$(read_unix_ts "$(group_state_file "$group" last_toast)")"
-    message="$(get_pending_message "$group")"
 
-    if (( now - last_sound >= ALERT_REPEAT_SOUND_SECONDS )); then
-      play_alert_sound
+    if ! get_pending_state "$group" || is_acknowledged "$group"; then
+      release_alert_lock
+      continue
+    fi
+
+    pending_since="$(get_pending_since "$group")"
+    message="$(get_pending_message "$group")"
+    next_sound="$(read_unix_ts "$(group_state_file "$group" next_sound)")"
+    next_toast="$(read_unix_ts "$(group_state_file "$group" next_toast)")"
+
+    if (( next_sound <= 0 )); then
+      next_sound=$((pending_since + ALERT_REPEAT_SOUND_SECONDS))
+    fi
+    if (( repeat_toast_enabled == 1 )) && (( next_toast <= 0 )); then
+      next_toast=$((pending_since + ALERT_REPEAT_TOAST_SECONDS))
+    fi
+
+    if (( ALERT_REPEAT_SOUND_SECONDS > 0 )) && (( now >= next_sound )); then
+      sound_due=1
+      while (( next_sound <= now )); do
+        next_sound=$((next_sound + ALERT_REPEAT_SOUND_SECONDS))
+      done
+      write_group_state "$group" next_sound "$next_sound"
       write_group_state "$group" last_sound "$now"
     fi
 
-    if (( now - last_toast >= ALERT_REPEAT_TOAST_SECONDS )); then
-      send_alert_toast "$message" "$group"
+    if (( repeat_toast_enabled == 1 )) && (( ALERT_REPEAT_TOAST_SECONDS > 0 )) && (( now >= next_toast )); then
+      toast_due=1
+      while (( next_toast <= now )); do
+        next_toast=$((next_toast + ALERT_REPEAT_TOAST_SECONDS))
+      done
+      write_group_state "$group" next_toast "$next_toast"
       write_group_state "$group" last_toast "$now"
+    fi
+
+    if (( ALERT_PENDING_TIMEOUT_SECONDS > 0 )) && (( now - pending_since >= ALERT_PENDING_TIMEOUT_SECONDS )); then
+      timeout_due=1
+    fi
+
+    release_alert_lock
+
+    if [[ "$sound_due" == "1" ]] && get_pending_state "$group"; then
+      play_alert_sound
+    fi
+
+    if [[ "$toast_due" == "1" ]] && get_pending_state "$group"; then
+      send_alert_toast "$message" "$group"
+    fi
+
+    if [[ "$timeout_due" == "1" ]] && get_pending_state "$group"; then
+      append_event_log "reminder_tick: pending_timeout group=${group} age=$((now - pending_since))"
+      clear_pending_alert "$group"
     fi
   done < <(list_groups_with_flag pending)
 }
@@ -1609,9 +2068,10 @@ json_get_string() {
   local key
   key="${path##*.}"
   key="${key//\"/}"
-  printf '%s' "$json" | perl -0777 -MEncode=decode -ne '
-    my $key = quotemeta $ARGV[0];
-    if (/"$key"\s*:\s*"((?:\\.|[^"\\])*)"/s) {
+  printf '%s' "$json" | perl -0777 -MEncode=decode -e '
+    my $key = quotemeta shift @ARGV;
+    my $json = do { local $/; <STDIN> };
+    if ($json =~ /"$key"\s*:\s*"((?:\\.|[^"\\])*)"/s) {
       my $s = $1;
       $s =~ s/\\"/"/g;
       $s =~ s/\\\\/\\/g;
@@ -1715,7 +2175,7 @@ process_tui_log_line() {
 
   if [[ "$line" == *'codex.op="exec_approval"'* ]] || [[ "$line" == *'op.dispatch.exec_approval'* ]]; then
     local exec_now
-    exec_now="$(date +%s)"
+    exec_now="$(now_interval_ts)"
     if [[ "$thread_group" != "$TUI_LAST_EXEC_APPROVAL_GROUP" ]] || (( exec_now - TUI_LAST_EXEC_APPROVAL_EPOCH > 1 )); then
       append_event_log "monitor_tui_log: exec_approval group=${thread_group}"
       TUI_LAST_EXEC_APPROVAL_GROUP="$thread_group"
@@ -1729,8 +2189,7 @@ process_tui_log_line() {
   fi
 
   if [[ "$line_is_progress" == "1" ]]; then
-    append_event_log "monitor_tui_log: clear_thread_pending_on_progress group=${thread_group}"
-    clear_alerts_for_thread_group "$thread_group"
+    append_event_log "monitor_tui_log: progress_observed group=${thread_group}"
   fi
 }
 
@@ -1820,6 +2279,14 @@ stop_monitor_processes() {
   MONITOR_PIDS=()
 }
 
+start_monitor_daemon_command() {
+  mkdir -p "$ALERT_STATE_DIR" >/dev/null 2>&1 || true
+  nohup env CODEX_NO_ALERT=1 "$0" --owner-supervisor-loop >/dev/null 2>&1 &
+  disown "$!" 2>/dev/null || true
+  nohup env CODEX_NO_ALERT=1 "$0" --monitor-tui-log >/dev/null 2>&1 &
+  disown "$!" 2>/dev/null || true
+}
+
 handle_signal() {
   local signal="$1"
   trap - "$signal"
@@ -1860,6 +2327,28 @@ case "${1:-}" in
     ;;
   --uninstall-hook|uninstall-hook)
     uninstall_hook_command
+    exit $?
+    ;;
+  --install-windows-toast|install-windows-toast)
+    install_windows_toast_command
+    exit $?
+    ;;
+  --uninstall-windows-toast|uninstall-windows-toast)
+    uninstall_windows_toast_command
+    exit $?
+    ;;
+  --start-monitor|start-monitor)
+    start_monitor_daemon_command
+    exit 0
+    ;;
+  --owner-supervisor-loop)
+    mkdir -p "$ALERT_STATE_DIR" >/dev/null 2>&1 || true
+    owner_supervisor_loop
+    exit $?
+    ;;
+  --monitor-tui-log)
+    mkdir -p "$ALERT_STATE_DIR" >/dev/null 2>&1 || true
+    monitor_tui_log
     exit $?
     ;;
   --hook-permission-request|hook-permission-request)
