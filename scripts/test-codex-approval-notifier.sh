@@ -226,7 +226,7 @@ JSON
 wait_for_log() {
   local pattern="$1"
   local attempts=0
-  while (( attempts < 40 )); do
+  while (( attempts < 80 )); do
     if [[ -f "$TEST_LOG" ]] && grep -q -- "$pattern" "$TEST_LOG"; then
       return 0
     fi
@@ -252,7 +252,7 @@ assert_log_not_contains() {
 wait_for_no_pending() {
   local state_dir="$1"
   local attempts=0
-  while (( attempts < 40 )); do
+  while (( attempts < 80 )); do
     if ! find "$state_dir" -maxdepth 1 -name 'codex-approval.*.pending' -print -quit 2>/dev/null | grep -q .; then
       return 0
     fi

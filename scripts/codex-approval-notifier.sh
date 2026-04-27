@@ -1266,6 +1266,11 @@ clear_ack_state() {
   remove_group_state "$group" ack
 }
 
+acknowledge_group() {
+  local group="$1"
+  write_group_state "$group" ack 1
+}
+
 clear_alert_toast() {
   local toast_group="${1:-$ALERT_TOAST_GROUP}"
   if [[ "$PLATFORM" == "darwin" ]] && command -v terminal-notifier >/dev/null 2>&1; then
@@ -1896,6 +1901,11 @@ start_pending_alert() {
 
   if [[ "$should_notify" == "1" ]]; then
     notify_approval "$message" "$toast_group"
+    if is_wsl && [[ "$(resolve_notification_backend)" == "windows-toast" ]]; then
+      now="$(now_interval_ts)"
+      write_group_state "$toast_group" last_sound "$now"
+      write_group_state "$toast_group" next_sound "$((now + ALERT_REPEAT_SOUND_SECONDS))"
+    fi
     append_event_log "start_pending_alert: notified group=${toast_group}"
   fi
 
@@ -1970,7 +1980,11 @@ reminder_tick() {
       next_toast=$((pending_since + ALERT_REPEAT_TOAST_SECONDS))
     fi
 
-    if (( ALERT_REPEAT_SOUND_SECONDS > 0 )) && (( now >= next_sound )); then
+    if (( ALERT_PENDING_TIMEOUT_SECONDS > 0 )) && (( now - pending_since >= ALERT_PENDING_TIMEOUT_SECONDS )); then
+      timeout_due=1
+    fi
+
+    if [[ "$timeout_due" != "1" ]] && (( ALERT_REPEAT_SOUND_SECONDS > 0 )) && (( now >= next_sound )); then
       sound_due=1
       while (( next_sound <= now )); do
         next_sound=$((next_sound + ALERT_REPEAT_SOUND_SECONDS))
@@ -1988,17 +2002,13 @@ reminder_tick() {
       write_group_state "$group" last_toast "$now"
     fi
 
-    if (( ALERT_PENDING_TIMEOUT_SECONDS > 0 )) && (( now - pending_since >= ALERT_PENDING_TIMEOUT_SECONDS )); then
-      timeout_due=1
-    fi
-
     release_alert_lock
 
-    if [[ "$sound_due" == "1" ]] && get_pending_state "$group"; then
+    if [[ "$sound_due" == "1" ]] && get_pending_state "$group" && ! is_acknowledged "$group"; then
       play_alert_sound
     fi
 
-    if [[ "$toast_due" == "1" ]] && get_pending_state "$group"; then
+    if [[ "$toast_due" == "1" ]] && get_pending_state "$group" && ! is_acknowledged "$group"; then
       send_alert_toast "$message" "$group"
     fi
 
@@ -2054,7 +2064,10 @@ clear_alerts_for_thread_group() {
 
   while IFS= read -r group; do
     [[ -n "$group" ]] || continue
-    group_belongs_to_thread "$group" "$thread_group" && clear_pending_alert "$group"
+    if group_belongs_to_thread "$group" "$thread_group"; then
+      acknowledge_group "$group"
+      clear_pending_alert "$group"
+    fi
   done < <(list_groups_with_flag pending)
 }
 

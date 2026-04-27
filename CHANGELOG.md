@@ -6,6 +6,7 @@
 - Install the Windows toast AppUserModelID automatically on WSL when WinRT is available.
 - Use monotonic reminder scheduling to avoid duplicate or early alarms when the WSL wall clock shifts.
 - Keep WSL toasts single-shot while sound reminders repeat until approval or timeout.
+- Count the initial WSL notification sound as part of the reminder window.
 - Fix restart cleanup for notifier lock directories.
 
 ## 1.0.2 - 2026-04-26
