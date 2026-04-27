@@ -219,7 +219,7 @@ It covers:
 | Event | Toast | Sound | Reason |
 | --- | --- | --- | --- |
 | Real Codex approval prompt | Yes | Yes | Codex emitted a `PermissionRequest` hook. |
-| WSL pending prompt remains unapproved | No repeat toast | Sound repeats every 5 seconds until timeout | Windows toasts stay single-shot while reminders continue. |
+| WSL pending prompt remains unapproved | No repeat toast | Initial sound, then repeats every 5 seconds until timeout | Windows toasts stay single-shot while reminders continue. |
 | Auto-approved command after "yes forever" | No | No | No `PermissionRequest` hook is emitted because Codex continues without asking. |
 | Normal sandboxed command | No | No | No approval path. |
 | Multiple prompts in parallel | One grouped alert per thread | Independent reminder state per thread | Avoids cross-session suppression. |

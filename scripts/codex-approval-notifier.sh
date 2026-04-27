@@ -1898,18 +1898,17 @@ start_pending_alert() {
   write_group_state "$toast_group" next_toast "$((now + ALERT_REPEAT_TOAST_SECONDS))"
   set_pending_state "$toast_group" 1
   append_event_log "start_pending_alert: pending=1 group=${toast_group} notify=${should_notify} message=$(event_message_value "$message")"
+  release_alert_lock
 
   if [[ "$should_notify" == "1" ]]; then
     notify_approval "$message" "$toast_group"
-    if is_wsl && [[ "$(resolve_notification_backend)" == "windows-toast" ]]; then
+    if is_wsl && [[ "$(resolve_notification_backend)" == "windows-toast" ]] && get_pending_state "$toast_group" && ! is_acknowledged "$toast_group"; then
       now="$(now_interval_ts)"
       write_group_state "$toast_group" last_sound "$now"
       write_group_state "$toast_group" next_sound "$((now + ALERT_REPEAT_SOUND_SECONDS))"
     fi
     append_event_log "start_pending_alert: notified group=${toast_group}"
   fi
-
-  release_alert_lock
 }
 
 clear_pending_alert() {
