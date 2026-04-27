@@ -1847,6 +1847,31 @@ notify_approval() {
   send_alert_toast "$alert_message" "$toast_group"
 }
 
+notify_pending_command() {
+  local toast_group="${1:-$ALERT_TOAST_GROUP}"
+  local message now
+
+  mkdir -p "$ALERT_STATE_DIR" >/dev/null 2>&1 || true
+  get_pending_state "$toast_group" || return 0
+  is_acknowledged "$toast_group" && return 0
+
+  message="$(get_pending_message "$toast_group")"
+  notify_approval "$message" "$toast_group"
+
+  if is_wsl && [[ "$(resolve_notification_backend)" == "windows-toast" ]] && get_pending_state "$toast_group" && ! is_acknowledged "$toast_group"; then
+    now="$(now_interval_ts)"
+    write_group_state "$toast_group" last_sound "$now"
+    write_group_state "$toast_group" next_sound "$((now + ALERT_REPEAT_SOUND_SECONDS))"
+  fi
+  append_event_log "notify_pending: notified group=${toast_group}"
+}
+
+start_notify_pending_process() {
+  local toast_group="$1"
+  nohup env CODEX_NO_ALERT=1 "$0" --notify-pending "$toast_group" >/dev/null 2>&1 &
+  disown "$!" 2>/dev/null || true
+}
+
 start_pending_alert() {
   local message="${1:-$ALERT_BODY}"
   local toast_group="${2:-$ALERT_TOAST_GROUP}"
@@ -1901,13 +1926,8 @@ start_pending_alert() {
   release_alert_lock
 
   if [[ "$should_notify" == "1" ]]; then
-    notify_approval "$message" "$toast_group"
-    if is_wsl && [[ "$(resolve_notification_backend)" == "windows-toast" ]] && get_pending_state "$toast_group" && ! is_acknowledged "$toast_group"; then
-      now="$(now_interval_ts)"
-      write_group_state "$toast_group" last_sound "$now"
-      write_group_state "$toast_group" next_sound "$((now + ALERT_REPEAT_SOUND_SECONDS))"
-    fi
-    append_event_log "start_pending_alert: notified group=${toast_group}"
+    start_notify_pending_process "$toast_group"
+    append_event_log "start_pending_alert: notify_queued group=${toast_group}"
   fi
 }
 
@@ -2361,6 +2381,11 @@ case "${1:-}" in
   --monitor-tui-log)
     mkdir -p "$ALERT_STATE_DIR" >/dev/null 2>&1 || true
     monitor_tui_log
+    exit $?
+    ;;
+  --notify-pending)
+    shift || true
+    notify_pending_command "${1:-$ALERT_TOAST_GROUP}"
     exit $?
     ;;
   --hook-permission-request|hook-permission-request)

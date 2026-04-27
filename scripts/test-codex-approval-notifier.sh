@@ -12,6 +12,7 @@ cleanup() {
     kill "$RUN_PID" >/dev/null 2>&1 || true
     wait "$RUN_PID" >/dev/null 2>&1 || true
   fi
+  pkill -f "$NOTIFIER --notify-pending" >/dev/null 2>&1 || true
   rm -rf "$TMP_ROOT"
 }
 trap cleanup EXIT
@@ -162,6 +163,14 @@ stop_notifier() {
     wait "$RUN_PID" >/dev/null 2>&1 || true
     RUN_PID=""
   fi
+  local attempts=0
+  while (( attempts < 40 )); do
+    if ! pgrep -f "$NOTIFIER --notify-pending" >/dev/null 2>&1; then
+      return 0
+    fi
+    attempts=$((attempts + 1))
+    sleep 0.05
+  done
 }
 
 append_prompt_line() {
