@@ -29,7 +29,7 @@ Sound backends:
 
 - macOS: `afplay`, then terminal bell.
 - WSL: Windows sound through PowerShell.
-- Linux: `paplay`, then `canberra-gtk-play`, then `aplay`, then terminal bell.
+- Linux: `paplay`, then `canberra-gtk-play`, then `aplay` (for `wav`/`au`/`voc` files), then terminal bell.
 
 Linux package hints:
 
