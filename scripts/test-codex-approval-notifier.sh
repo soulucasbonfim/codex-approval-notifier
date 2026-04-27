@@ -383,6 +383,27 @@ run_orphan_lock_case() {
   pass "orphan lock is reclaimed"
 }
 
+run_hook_ignores_global_lock_case() {
+  local case_dir="${TMP_ROOT}/hook-global-lock"
+  local tui_log="${case_dir}/codex-tui.log"
+  local sound_file="${case_dir}/sound.aiff"
+  local state_dir="${case_dir}/state"
+  local started_ms ended_ms elapsed_ms
+  mkdir -p "${state_dir}/codex-approval.lock" "$case_dir"
+  printf '%s' "$$" >"${state_dir}/codex-approval.lock/owner"
+  : >"$sound_file"
+
+  start_notifier linux "$state_dir" "$tui_log" "$sound_file"
+  started_ms="$(perl -MTime::HiRes=time -e 'printf "%.0f", time() * 1000')"
+  send_permission_request_hook linux "$state_dir" "$tui_log" "$sound_file"
+  ended_ms="$(perl -MTime::HiRes=time -e 'printf "%.0f", time() * 1000')"
+  elapsed_ms=$((ended_ms - started_ms))
+  (( elapsed_ms < 1500 )) || fail "PermissionRequest hook waited on the global alert lock"
+  assert_log_contains 'notify-send'
+  stop_notifier
+  pass "PermissionRequest hook does not wait on global alert lock"
+}
+
 run_self_status_clear_case() {
   local case_dir="${TMP_ROOT}/self-status-clear"
   local state_dir="${case_dir}/state"
@@ -525,6 +546,7 @@ run_private_log_case
 run_backend_timeout_fallback_case
 run_remove_hang_case
 run_orphan_lock_case
+run_hook_ignores_global_lock_case
 run_hook_install_uninstall_case
 
 printf 'all smoke tests passed\n'

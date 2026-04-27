@@ -92,6 +92,9 @@ cleanup_state_dir() {
   while IFS= read -r path; do
     [[ -n "$path" ]] && dirs+=("$path")
   done < <(state_dirs_for "$dir" "$prefix")
+  while IFS= read -r path; do
+    [[ -n "$path" ]] && dirs+=("$path")
+  done < <(find "$dir" -maxdepth 1 -type d -name "${prefix}.*.lock" -print 2>/dev/null || true)
 
   while IFS= read -r path; do
     [[ -n "$path" ]] && files+=("$path")

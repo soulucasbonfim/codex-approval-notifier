@@ -6,7 +6,7 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
-CODEX_APPROVAL_NOTIFIER_VERSION="1.0.3"
+CODEX_APPROVAL_NOTIFIER_VERSION="1.0.4"
 
 need_cmd() {
   command_exists "$1" || {
@@ -89,10 +89,10 @@ if [[ -z "$ALERT_SOUND_FILE" ]]; then
 fi
 
 HASH_COMMAND=""
-if command_exists shasum; then
-  HASH_COMMAND="shasum"
-elif command_exists sha1sum; then
+if command_exists sha1sum; then
   HASH_COMMAND="sha1sum"
+elif command_exists shasum; then
+  HASH_COMMAND="shasum"
 elif command_exists openssl; then
   HASH_COMMAND="openssl"
 else
@@ -134,6 +134,13 @@ group_state_file() {
   local key
   key="$(group_key "$group")"
   printf '%s/%s.%s.%s' "$ALERT_STATE_DIR" "$ALERT_STATE_PREFIX" "$key" "$suffix"
+}
+
+group_lock_dir() {
+  local group="${1:-$ALERT_TOAST_GROUP}"
+  local key
+  key="$(group_key "$group")"
+  printf '%s/%s.%s.lock' "$ALERT_STATE_DIR" "$ALERT_STATE_PREFIX" "$key"
 }
 
 write_group_state() {
@@ -1319,29 +1326,40 @@ has_recent_progress() {
   ! elapsed_since_ge "$since" "$threshold_seconds"
 }
 
-acquire_alert_lock() {
+acquire_dir_lock() {
+  local lock_dir="$1"
+  local max_attempts="${2:-300}"
   local attempts=0
-  while ! mkdir "$ALERT_LOCK_DIR" >/dev/null 2>&1; do
+  while ! mkdir "$lock_dir" >/dev/null 2>&1; do
     attempts=$((attempts + 1))
     if (( attempts % 20 == 0 )); then
-      reclaim_lock_if_needed "$ALERT_LOCK_DIR" || true
+      reclaim_lock_if_needed "$lock_dir" || true
     fi
-    if (( attempts >= 300 )); then
+    if (( attempts >= max_attempts )); then
       return 1
     fi
     sleep 0.01
   done
-  printf '%s' "${BASHPID:-$$}" >"${ALERT_LOCK_DIR}/owner" 2>/dev/null || true
+  printf '%s' "${BASHPID:-$$}" >"${lock_dir}/owner" 2>/dev/null || true
+}
+
+release_dir_lock() {
+  local lock_dir="$1"
+  local owner=""
+  if [[ -f "${lock_dir}/owner" ]]; then
+    owner="$(cat "${lock_dir}/owner" 2>/dev/null || true)"
+    [[ -z "$owner" || "$owner" == "${BASHPID:-$$}" ]] || return 0
+  fi
+  rm -f "${lock_dir}/owner" >/dev/null 2>&1 || true
+  rmdir "$lock_dir" >/dev/null 2>&1 || true
+}
+
+acquire_alert_lock() {
+  acquire_dir_lock "$ALERT_LOCK_DIR" 300
 }
 
 release_alert_lock() {
-  local owner=""
-  if [[ -f "${ALERT_LOCK_DIR}/owner" ]]; then
-    owner="$(cat "${ALERT_LOCK_DIR}/owner" 2>/dev/null || true)"
-    [[ -z "$owner" || "$owner" == "${BASHPID:-$$}" ]] || return 0
-  fi
-  rm -f "${ALERT_LOCK_DIR}/owner" >/dev/null 2>&1 || true
-  rmdir "$ALERT_LOCK_DIR" >/dev/null 2>&1 || true
+  release_dir_lock "$ALERT_LOCK_DIR"
 }
 
 resolve_sender_bundle_id() {
@@ -1875,14 +1893,15 @@ start_notify_pending_process() {
 start_pending_alert() {
   local message="${1:-$ALERT_BODY}"
   local toast_group="${2:-$ALERT_TOAST_GROUP}"
-  local now last_event key previous_key
+  local now last_event key previous_key lock_dir
   local should_notify=1
 
   key="$(hash_text "$message")"
   now="$(now_interval_ts)"
   previous_key=""
+  lock_dir="$(group_lock_dir "$toast_group")"
 
-  if ! acquire_alert_lock; then
+  if ! acquire_dir_lock "$lock_dir" 20; then
     append_event_log "start_pending_alert: lock busy group=${toast_group}"
     return 0
   fi
@@ -1891,7 +1910,7 @@ start_pending_alert() {
   if get_pending_state "$toast_group"; then
     set_pending_message "$toast_group" "$message"
     append_event_log "start_pending_alert: already pending group=${toast_group}"
-    release_alert_lock
+    release_dir_lock "$lock_dir"
     return 0
   fi
 
@@ -1923,7 +1942,7 @@ start_pending_alert() {
   write_group_state "$toast_group" next_toast "$((now + ALERT_REPEAT_TOAST_SECONDS))"
   set_pending_state "$toast_group" 1
   append_event_log "start_pending_alert: pending=1 group=${toast_group} notify=${should_notify} message=$(event_message_value "$message")"
-  release_alert_lock
+  release_dir_lock "$lock_dir"
 
   if [[ "$should_notify" == "1" ]]; then
     start_notify_pending_process "$toast_group"
@@ -2115,6 +2134,39 @@ json_get_string() {
   ' "$key"
 }
 
+parse_permission_request_payload() {
+  local json="$1"
+  if command_exists jq; then
+    printf '%s' "$json" | jq -r '[
+      .hook_event_name // "",
+      .session_id // "",
+      .turn_id // "",
+      .tool_name // "",
+      .tool_input.command // "",
+      .tool_input.description // "",
+      .reason // ""
+    ] | map(gsub("[\t\r\n]+"; " ")) | @tsv' 2>/dev/null && return 0
+  fi
+
+  printf '%s' "$json" | perl -0777 -e '
+    my $json = do { local $/; <STDIN> };
+    sub value {
+      my ($key) = @_;
+      my $q = quotemeta($key);
+      return "" unless $json =~ /"$q"\s*:\s*"((?:\\.|[^"\\])*)"/s;
+      my $s = $1;
+      $s =~ s/\\"/"/g;
+      $s =~ s/\\\\/\\/g;
+      $s =~ s/\\n/ /g;
+      $s =~ s/\\r/ /g;
+      $s =~ s/\\t/ /g;
+      $s =~ s/[\t\r\n]+/ /g;
+      return $s;
+    }
+    print join("\t", map { value($_) } qw(hook_event_name session_id turn_id tool_name command description reason));
+  '
+}
+
 truncate_message() {
   local message="$1"
   local max_chars="${2:-360}"
@@ -2149,7 +2201,7 @@ approval_group_for_hook() {
 }
 
 hook_permission_request_command() {
-  local payload hook_event session_id turn_id tool_name command description message group
+  local payload hook_event session_id turn_id tool_name command description reason message group
 
   mkdir -p "$ALERT_STATE_DIR" >/dev/null 2>&1 || true
   payload="$(cat)"
@@ -2159,19 +2211,15 @@ hook_permission_request_command() {
     return 0
   fi
 
-  hook_event="$(json_get_string "$payload" '.hook_event_name' | head -n1 || true)"
+  IFS=$'\t' read -r hook_event session_id turn_id tool_name command description reason < <(parse_permission_request_payload "$payload") || true
+
   if [[ -n "$hook_event" ]] && [[ "$hook_event" != "PermissionRequest" ]]; then
     append_event_log "hook_permission_request: ignored_event event=${hook_event}"
     return 0
   fi
 
-  session_id="$(json_get_string "$payload" '.session_id' | head -n1 || true)"
-  turn_id="$(json_get_string "$payload" '.turn_id' | head -n1 || true)"
-  tool_name="$(json_get_string "$payload" '.tool_name' | head -n1 || true)"
-  command="$(json_get_string "$payload" '.tool_input.command' | head -n1 || true)"
-  description="$(json_get_string "$payload" '.tool_input.description' | head -n1 || true)"
   if [[ -z "$description" ]]; then
-    description="$(json_get_string "$payload" '.reason' | head -n1 || true)"
+    description="$reason"
   fi
 
   message="$description"

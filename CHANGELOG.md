@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.4 - 2026-04-27
+
+- Avoid `PermissionRequest` hook timeouts when multiple approval prompts start in parallel.
+
 ## 1.0.3 - 2026-04-27
 
 - Add WSL support through Windows toast notifications and Windows sound.
