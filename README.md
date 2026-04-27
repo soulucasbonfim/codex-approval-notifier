@@ -4,7 +4,7 @@
 
 Desktop notification and sound reminder for Codex approval prompts.
 
-Current release: `1.0.4`.
+Current release: `1.0.5`.
 
 The notifier uses Codex's `PermissionRequest` hook as the primary approval signal, then watches Codex's TUI log (`~/.codex/log/codex-tui.log`) only to clear stale alerts when the approval/command flow advances. This avoids pseudo-terminal rendering issues and avoids heuristic false positives from normal command logs.
 
@@ -42,6 +42,14 @@ macOS package hint:
 - Optional preferred notifier: `brew install terminal-notifier`
 
 Only one visual notification backend is required. Sound is optional and can be disabled with `CODEX_ALERT_PLAY_SOUND=0`.
+
+Linux `notify-send` defaults:
+
+- `CODEX_ALERT_NOTIFY_EXPIRE_MS=5000`
+- `CODEX_ALERT_NOTIFY_URGENCY=normal`
+- `CODEX_ALERT_NOTIFY_TRANSIENT=1`
+
+These defaults aim for a visible banner that auto-dismisses, while avoiding sticky notification-center entries on common GNOME setups.
 
 ## Quick Start
 
@@ -220,7 +228,7 @@ It covers:
 | --- | --- | --- | --- |
 | Real Codex approval prompt | Yes | Yes | Codex emitted a `PermissionRequest` hook. |
 | WSL pending prompt remains unapproved | No repeat toast | Initial sound, then repeats every 5 seconds until timeout | Windows toasts stay single-shot while reminders continue. |
-| Auto-approved command after "yes forever" | No | No | No `PermissionRequest` hook is emitted because Codex continues without asking. |
+| Auto-approved command after selecting "Yes, and don't ask again for commands that start with ..." | No | No | No `PermissionRequest` hook is emitted because Codex auto-approves future commands for that prefix. |
 | Normal sandboxed command | No | No | No approval path. |
 | Multiple prompts in parallel | One grouped alert per thread | Independent reminder state per thread | Avoids cross-session suppression. |
 | Original monitor-owner session exits | Existing live session takes over reminders | Continues alerting pending prompts | Prevents alert loss in multi-session usage. |
@@ -274,7 +282,9 @@ Common variables:
 ```bash
 export CODEX_ALERT_PLAY_SOUND=1
 export CODEX_ALERT_SOUND=Funk
-export CODEX_ALERT_NOTIFY_EXPIRE_MS=0
+export CODEX_ALERT_NOTIFY_EXPIRE_MS=5000
+export CODEX_ALERT_NOTIFY_URGENCY=normal
+export CODEX_ALERT_NOTIFY_TRANSIENT=1
 export CODEX_ALERT_BACKEND_TIMEOUT_SECONDS=2
 export CODEX_ALERT_LOG_MESSAGES=1
 export CODEX_ALERT_HOOK_PERMISSION_REQUEST_ENABLED=1

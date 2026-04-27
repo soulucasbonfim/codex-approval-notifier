@@ -6,7 +6,7 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
-CODEX_APPROVAL_NOTIFIER_VERSION="1.0.4"
+CODEX_APPROVAL_NOTIFIER_VERSION="1.0.5"
 
 need_cmd() {
   command_exists "$1" || {
@@ -55,11 +55,26 @@ ALERT_ORPHAN_LOCK_GRACE_SECONDS="${CODEX_ALERT_ORPHAN_LOCK_GRACE_SECONDS:-1}"
 ALERT_TOAST_SENDER_BUNDLE_ID="${CODEX_ALERT_TOAST_SENDER_BUNDLE_ID:-}"
 ALERT_PLAY_SOUND="${CODEX_ALERT_PLAY_SOUND:-1}"
 ALERT_SOUND_FILE="${CODEX_ALERT_SOUND_FILE:-}"
-ALERT_NOTIFY_EXPIRE_MS="${CODEX_ALERT_NOTIFY_EXPIRE_MS:-0}"
+ALERT_NOTIFY_EXPIRE_MS="${CODEX_ALERT_NOTIFY_EXPIRE_MS:-5000}"
+ALERT_NOTIFY_URGENCY="${CODEX_ALERT_NOTIFY_URGENCY:-normal}"
+ALERT_NOTIFY_TRANSIENT="${CODEX_ALERT_NOTIFY_TRANSIENT:-1}"
 ALERT_NOTIFY_CATEGORY="${CODEX_ALERT_NOTIFY_CATEGORY:-im.received}"
 ALERT_BACKEND_TIMEOUT_SECONDS="${CODEX_ALERT_BACKEND_TIMEOUT_SECONDS:-2}"
 ALERT_LOG_MESSAGES="${CODEX_ALERT_LOG_MESSAGES:-1}"
 ALERT_HOOK_PERMISSION_REQUEST_ENABLED="${CODEX_ALERT_HOOK_PERMISSION_REQUEST_ENABLED:-1}"
+
+case "$ALERT_NOTIFY_URGENCY" in
+  low|normal|critical) ;;
+  *)
+    ALERT_NOTIFY_URGENCY="normal"
+    ;;
+esac
+case "$ALERT_NOTIFY_TRANSIENT" in
+  0|1) ;;
+  *)
+    ALERT_NOTIFY_TRANSIENT="1"
+    ;;
+esac
 ALERT_WINDOWS_APP_ID="${CODEX_ALERT_WINDOWS_APP_ID:-Codex}"
 ALERT_WINDOWS_SHORTCUT_NAME="${CODEX_ALERT_WINDOWS_SHORTCUT_NAME:-Codex Approval Notifier.lnk}"
 ALERT_WINDOWS_NOTIFYICON_FALLBACK="${CODEX_ALERT_WINDOWS_NOTIFYICON_FALLBACK:-1}"
@@ -445,6 +460,16 @@ resolve_notification_backend() {
   printf 'none'
 }
 
+aplay_file_supported() {
+  local sound_file="$1"
+  local lower
+  lower="${sound_file,,}"
+  case "$lower" in
+    *.wav|*.au|*.voc) return 0 ;;
+  esac
+  return 1
+}
+
 resolve_sound_backend() {
   [[ "$ALERT_PLAY_SOUND" == "1" ]] || {
     printf 'disabled'
@@ -468,7 +493,7 @@ resolve_sound_backend() {
       printf 'canberra-gtk-play'
       return 0
     fi
-    if command_exists aplay && [[ -f "$ALERT_SOUND_FILE" ]]; then
+    if command_exists aplay && [[ -f "$ALERT_SOUND_FILE" ]] && aplay_file_supported "$ALERT_SOUND_FILE"; then
       printf 'aplay'
       return 0
     fi
@@ -483,6 +508,7 @@ print_notify_send_capabilities() {
   printf '  %-22s %s\n' "notify --app-name" "$(notify_send_supports '--app-name' && printf yes || printf no)"
   printf '  %-22s %s\n' "notify --category" "$(notify_send_supports '--category' && printf yes || printf no)"
   printf '  %-22s %s\n' "notify --expire-time" "$(notify_send_supports '--expire-time' && printf yes || printf no)"
+  printf '  %-22s %s\n' "notify --transient" "$(notify_send_supports '--transient' && printf yes || printf no)"
 }
 
 print_file_status() {
@@ -663,7 +689,9 @@ Usage:
 Environment:
   CODEX_ALERT_STATE_DIR=path             Default: ${TMPDIR:-/tmp}/codex-approval-notifier/$USER
   CODEX_ALERT_PLAY_SOUND=0|1             Default: 1
-  CODEX_ALERT_NOTIFY_EXPIRE_MS=ms        Default: 0
+  CODEX_ALERT_NOTIFY_EXPIRE_MS=ms        Default: 5000
+  CODEX_ALERT_NOTIFY_URGENCY=level       Default: normal
+  CODEX_ALERT_NOTIFY_TRANSIENT=0|1       Default: 1
   CODEX_ALERT_BACKEND_TIMEOUT_SECONDS     Default: 2
   CODEX_ALERT_LOG_MESSAGES=0|1           Default: 1
   CODEX_ALERT_HOOK_PERMISSION_REQUEST_ENABLED=0|1  Default: 1
@@ -879,6 +907,21 @@ backend_skip() {
   printf '  %-22s skipped (%s)\n' "$label" "$reason"
 }
 
+ring_terminal_bell() {
+  if [[ -t 2 ]]; then
+    printf '\a' >&2
+    return 0
+  fi
+  if [[ -t 1 ]]; then
+    printf '\a' >&1
+    return 0
+  fi
+  if tty -s 2>/dev/null; then
+    printf '\a' >/dev/tty 2>/dev/null || true
+  fi
+  return 0
+}
+
 sound_backend_check() {
   local backend="$1"
   case "$backend" in
@@ -892,13 +935,13 @@ sound_backend_check() {
       command_exists canberra-gtk-play && run_with_timeout "$ALERT_BACKEND_TIMEOUT_SECONDS" canberra-gtk-play -i message
       ;;
     aplay)
-      command_exists aplay && [[ -f "$ALERT_SOUND_FILE" ]] && run_with_timeout "$ALERT_BACKEND_TIMEOUT_SECONDS" aplay -q "$ALERT_SOUND_FILE"
+      command_exists aplay && [[ -f "$ALERT_SOUND_FILE" ]] && aplay_file_supported "$ALERT_SOUND_FILE" && run_with_timeout "$ALERT_BACKEND_TIMEOUT_SECONDS" aplay -q "$ALERT_SOUND_FILE"
       ;;
     windows-sound)
       command_exists powershell.exe && run_with_timeout "$ALERT_BACKEND_TIMEOUT_SECONDS" powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "\$sound = '${ALERT_WINDOWS_SOUND_FILE//\'/\'\'}'; Add-Type -MemberDefinition '[DllImport(\"winmm.dll\", SetLastError=true)] public static extern bool PlaySound(string pszSound, System.IntPtr hmod, uint fdwSound);' -Name WinMM -Namespace CodexApprovalNotifier; [CodexApprovalNotifier.WinMM]::PlaySound(\$sound, [IntPtr]::Zero, 0x00020000) | Out-Null"
       ;;
     terminal-bell)
-      printf '\a' >/dev/tty 2>/dev/null || true
+      ring_terminal_bell
       ;;
     *)
       return 1
@@ -977,10 +1020,10 @@ backend_test_command() {
       else
         backend_skip canberra-gtk-play missing
       fi
-      if command_exists aplay && [[ -f "$ALERT_SOUND_FILE" ]]; then
+      if command_exists aplay && [[ -f "$ALERT_SOUND_FILE" ]] && aplay_file_supported "$ALERT_SOUND_FILE"; then
         backend_check aplay sound_backend_check aplay || failures=$((failures + 1))
       else
-        backend_skip aplay "missing command or sound file"
+        backend_skip aplay "missing command or unsupported sound file"
       fi
       backend_check terminal-bell sound_backend_check terminal-bell || failures=$((failures + 1))
     fi
@@ -1280,6 +1323,7 @@ acknowledge_group() {
 
 clear_alert_toast() {
   local toast_group="${1:-$ALERT_TOAST_GROUP}"
+  local notify_id
   if [[ "$PLATFORM" == "darwin" ]] && command -v terminal-notifier >/dev/null 2>&1; then
     # terminal-notifier -remove may hang on some macOS states. Never let toast
     # cleanup block the approval monitor or leave the alert lock held.
@@ -1291,7 +1335,47 @@ clear_alert_toast() {
       wait "$remove_pid" >/dev/null 2>&1 || true
     ) >/dev/null 2>&1 &
     disown "$!" >/dev/null 2>&1 || true
+    return 0
   fi
+
+  if [[ "$PLATFORM" == "linux" ]]; then
+    notify_id="$(read_group_state "$toast_group" notify_id 2>/dev/null || true)"
+    if [[ "$notify_id" =~ ^[0-9]+$ ]] && command_exists gdbus; then
+      run_with_timeout "$ALERT_BACKEND_TIMEOUT_SECONDS" \
+        gdbus call --session \
+        --dest org.freedesktop.Notifications \
+        --object-path /org/freedesktop/Notifications \
+        --method org.freedesktop.Notifications.CloseNotification \
+        "$notify_id" >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
+schedule_linux_notification_close() {
+  local notify_id="$1"
+  local close_seconds
+
+  [[ "$PLATFORM" == "linux" ]] || return 0
+  [[ "$notify_id" =~ ^[0-9]+$ ]] || return 0
+  command_exists gdbus || return 0
+  [[ "$ALERT_NOTIFY_EXPIRE_MS" =~ ^[0-9]+$ ]] || return 0
+  (( ALERT_NOTIFY_EXPIRE_MS > 0 )) || return 0
+
+  close_seconds=$(((ALERT_NOTIFY_EXPIRE_MS + 999) / 1000))
+  if (( close_seconds < 1 )); then
+    close_seconds=1
+  fi
+
+  (
+    sleep "$close_seconds"
+    run_with_timeout "$ALERT_BACKEND_TIMEOUT_SECONDS" \
+      gdbus call --session \
+      --dest org.freedesktop.Notifications \
+      --object-path /org/freedesktop/Notifications \
+      --method org.freedesktop.Notifications.CloseNotification \
+      "$notify_id" >/dev/null 2>&1 || true
+  ) >/dev/null 2>&1 &
+  disown "$!" >/dev/null 2>&1 || true
 }
 
 is_acknowledged() {
@@ -1388,7 +1472,7 @@ play_alert_sound() {
       run_detached_with_timeout powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "\$sound = '${ALERT_WINDOWS_SOUND_FILE//\'/\'\'}'; Add-Type -MemberDefinition '[DllImport(\"winmm.dll\", SetLastError=true)] public static extern bool PlaySound(string pszSound, System.IntPtr hmod, uint fdwSound);' -Name WinMM -Namespace CodexApprovalNotifier; [CodexApprovalNotifier.WinMM]::PlaySound(\$sound, [IntPtr]::Zero, 0x00020000) | Out-Null"
       ;;
     terminal-bell)
-      printf '\a' >/dev/tty 2>/dev/null || true
+      ring_terminal_bell
       ;;
   esac
   append_event_log "play_alert_sound: backend=${backend}"
@@ -1764,7 +1848,10 @@ send_linux_notify_send() {
   local -a args=()
 
   command_exists notify-send || return 1
-  args+=(--urgency=critical)
+  args+=(--urgency="$ALERT_NOTIFY_URGENCY")
+  if [[ "$ALERT_NOTIFY_TRANSIENT" == "1" ]] && notify_send_supports '--transient'; then
+    args+=(--transient)
+  fi
   if notify_send_supports '--app-name'; then
     args+=(--app-name="$ALERT_TITLE")
   fi
@@ -1791,6 +1878,7 @@ send_linux_notify_send() {
     new_id="$(printf '%s' "$new_id" | awk 'NF {print $1; exit}')"
     if [[ "$new_id" =~ ^[0-9]+$ ]]; then
       write_group_state "$toast_group" notify_id "$new_id"
+      schedule_linux_notification_close "$new_id"
     fi
     return 0
   fi

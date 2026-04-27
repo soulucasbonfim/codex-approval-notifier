@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.5 - 2026-04-27
+
+- Improve Linux notification behavior defaults for `notify-send` with `normal` urgency, transient mode, and 5-second expiration.
+- Add Linux notification cleanup by closing active notifications through DBus when approvals are resolved.
+- Add a defensive scheduled DBus close for daemons that do not honor `--expire-time`.
+- Prevent noisy `/dev/tty` errors from terminal bell fallback in non-interactive contexts.
+- Avoid selecting `aplay` for unsupported sound formats like `.oga` to prevent distorted audio.
+- Align README terminology with current Codex approval UI text: "Yes, and don't ask again for commands that start with ...".
+- Update script help text and README defaults for new Linux notification variables.
+
 ## 1.0.4 - 2026-04-27
 
 - Avoid `PermissionRequest` hook timeouts when multiple approval prompts start in parallel.
