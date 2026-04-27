@@ -6,7 +6,7 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
-CODEX_APPROVAL_NOTIFIER_VERSION="1.0.2"
+CODEX_APPROVAL_NOTIFIER_VERSION="1.0.3"
 
 need_cmd() {
   command_exists "$1" || {

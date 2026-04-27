@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.3 - 2026-04-27
+
+- Add WSL support through Windows toast notifications and Windows sound.
+- Install the Windows toast AppUserModelID automatically on WSL when WinRT is available.
+- Use monotonic reminder scheduling to avoid duplicate or early alarms when the WSL wall clock shifts.
+- Keep WSL toasts single-shot while sound reminders repeat until approval or timeout.
+- Fix restart cleanup for notifier lock directories.
+
 ## 1.0.2 - 2026-04-26
 
 - Start TUI log cleanup monitoring at the current end of `codex-tui.log`.
