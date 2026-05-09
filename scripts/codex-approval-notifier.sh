@@ -6,7 +6,7 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
-CODEX_APPROVAL_NOTIFIER_VERSION="1.0.7"
+CODEX_APPROVAL_NOTIFIER_VERSION="1.0.8"
 
 need_cmd() {
   command_exists "$1" || {
@@ -89,6 +89,8 @@ ALERT_STATE_PREFIX="${CODEX_ALERT_STATE_PREFIX:-codex-approval}"
 ALERT_LOCK_DIR="${ALERT_STATE_DIR}/${ALERT_STATE_PREFIX}.lock"
 ALERT_MONITOR_PID_FILE="${ALERT_STATE_DIR}/${ALERT_STATE_PREFIX}.monitor_pid"
 ALERT_MONITOR_LOCK_DIR="${ALERT_STATE_DIR}/${ALERT_STATE_PREFIX}.monitor_lock"
+ALERT_MONITOR_HEARTBEAT_FILE="${ALERT_STATE_DIR}/${ALERT_STATE_PREFIX}.monitor_heartbeat"
+ALERT_MONITOR_HEARTBEAT_STALE_SECONDS="${CODEX_ALERT_MONITOR_HEARTBEAT_STALE_SECONDS:-3}"
 ALERT_TOAST_GROUP="${CODEX_ALERT_TOAST_GROUP:-${ALERT_STATE_PREFIX}}"
 ALERT_EVENT_LOG_FILE="${ALERT_STATE_DIR}/${ALERT_STATE_PREFIX}.events.log"
 ALERT_INSTALLED_PATH="${CODEX_ALERT_INSTALLED_PATH:-${HOME}/.local/bin/codex-approval-notifier}"
@@ -1064,7 +1066,7 @@ release_monitor_lock() {
 }
 
 claim_monitor_ownership() {
-  local current_pid
+  local current_pid now owner_hb hb_age
   local owner_pid=""
   IS_MONITOR_OWNER=0
   ALERT_OWNER_PID=""
@@ -1079,6 +1081,15 @@ claim_monitor_ownership() {
   fi
 
   if [[ -n "$owner_pid" ]] && is_pid_alive "$owner_pid"; then
+    now="$(now_interval_ts)"
+    owner_hb="$(read_unix_ts "$ALERT_MONITOR_HEARTBEAT_FILE")"
+    hb_age=$((now - owner_hb))
+    if (( owner_hb > 0 )) && (( hb_age > ALERT_MONITOR_HEARTBEAT_STALE_SECONDS )); then
+      owner_pid=""
+    fi
+  fi
+
+  if [[ -n "$owner_pid" ]] && is_pid_alive "$owner_pid"; then
     if [[ "$owner_pid" == "$current_pid" ]]; then
       IS_MONITOR_OWNER=1
       ALERT_OWNER_PID="$current_pid"
@@ -1088,6 +1099,7 @@ claim_monitor_ownership() {
   fi
 
   printf '%s' "$current_pid" >"$ALERT_MONITOR_PID_FILE" 2>/dev/null || true
+  printf '%s' "$(now_interval_ts)" >"$ALERT_MONITOR_HEARTBEAT_FILE" 2>/dev/null || true
   IS_MONITOR_OWNER=1
   ALERT_OWNER_PID="$current_pid"
   release_monitor_lock
@@ -1110,6 +1122,7 @@ release_monitor_ownership() {
     owner_pid="$(cat "$ALERT_MONITOR_PID_FILE" 2>/dev/null || true)"
     if [[ "$owner_pid" == "$ALERT_OWNER_PID" ]]; then
       rm -f "$ALERT_MONITOR_PID_FILE" >/dev/null 2>&1 || true
+      rm -f "$ALERT_MONITOR_HEARTBEAT_FILE" >/dev/null 2>&1 || true
     fi
   fi
   release_monitor_lock
@@ -2158,6 +2171,7 @@ owner_supervisor_loop() {
         initialize_alert_state
       fi
       was_owner=1
+      printf '%s' "$(now_interval_ts)" >"$ALERT_MONITOR_HEARTBEAT_FILE" 2>/dev/null || true
       reminder_tick
       sleep "$ALERT_LOOP_TICK_SECONDS"
       continue
@@ -2322,6 +2336,9 @@ hook_permission_request_command() {
   message="$(truncate_message "$message")"
 
   group="$(approval_group_for_hook "$session_id" "$turn_id" "$tool_name" "$command")"
+  # Hooks may run even if Codex was started without the shell wrapper.
+  # Ensure reminder loops are running so sound repeats are not lost.
+  ensure_monitor_daemon_running
   append_event_log "hook_permission_request: start group=${group} tool=${tool_name:-unknown} message=$(event_message_value "$message")"
   start_pending_alert "$message" "$group"
   return 0
@@ -2455,6 +2472,18 @@ start_monitor_daemon_command() {
   disown "$!" 2>/dev/null || true
   nohup env CODEX_NO_ALERT=1 "$0" --monitor-tui-log >/dev/null 2>&1 &
   disown "$!" 2>/dev/null || true
+}
+
+ensure_monitor_daemon_running() {
+  local pid=""
+  if [[ -f "$ALERT_MONITOR_PID_FILE" ]]; then
+    pid="$(cat "$ALERT_MONITOR_PID_FILE" 2>/dev/null || true)"
+  fi
+  if [[ -n "$pid" ]] && is_pid_alive "$pid"; then
+    return 0
+  fi
+  append_event_log "ensure_monitor_daemon_running: starting daemon"
+  start_monitor_daemon_command
 }
 
 handle_signal() {

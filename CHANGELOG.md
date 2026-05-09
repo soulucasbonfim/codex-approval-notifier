@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.8 - 2026-05-09
+
+- Ensure `PermissionRequest` hooks auto-start notifier daemons when Codex is not launched via shell wrapper.
+- Add monitor-owner heartbeat and stale-owner re-election to prevent silent reminder stalls.
+- Improve cleanup of monitor ownership metadata.
+
 ## 1.0.7 - 2026-05-09
 
 - Fix macOS Bash compatibility by replacing `${var,,}` lowercase expansion in WSL detection with a POSIX-safe `tr` conversion.
