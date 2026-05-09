@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.7 - 2026-05-09
+
+- Fix macOS Bash compatibility by replacing `${var,,}` lowercase expansion in WSL detection with a POSIX-safe `tr` conversion.
+- Restore reliable toast/sound delivery in environments where the default shell is Bash 3.2 (common on macOS).
+
 ## 1.0.6 - 2026-05-09
 
 - Migrate managed feature flag from deprecated `codex_hooks = true` to `hooks = true`.

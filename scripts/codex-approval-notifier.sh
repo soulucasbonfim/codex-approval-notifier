@@ -6,7 +6,7 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
-CODEX_APPROVAL_NOTIFIER_VERSION="1.0.6"
+CODEX_APPROVAL_NOTIFIER_VERSION="1.0.7"
 
 need_cmd() {
   command_exists "$1" || {
@@ -415,14 +415,16 @@ notify_send_supports() {
 }
 
 is_wsl() {
-  local release version
+  local release version release_lc version_lc
   case "${CODEX_ALERT_WSL:-}" in
     1|true|yes) return 0 ;;
     0|false|no) return 1 ;;
   esac
   release="$(cat /proc/sys/kernel/osrelease 2>/dev/null || true)"
   version="$(cat /proc/version 2>/dev/null || true)"
-  [[ "${release,,}" == *microsoft* || "${release,,}" == *wsl* || "${version,,}" == *microsoft* || "${version,,}" == *wsl* ]]
+  release_lc="$(printf '%s' "$release" | tr '[:upper:]' '[:lower:]')"
+  version_lc="$(printf '%s' "$version" | tr '[:upper:]' '[:lower:]')"
+  [[ "$release_lc" == *microsoft* || "$release_lc" == *wsl* || "$version_lc" == *microsoft* || "$version_lc" == *wsl* ]]
 }
 
 resolve_notification_backend() {
