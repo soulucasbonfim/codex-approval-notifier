@@ -4,7 +4,7 @@
 
 Desktop notification and sound reminder for Codex approval prompts.
 
-Current release: `1.0.5`.
+Current release: `1.0.6`.
 
 The notifier uses Codex's `PermissionRequest` hook as the primary approval signal, then watches Codex's TUI log (`~/.codex/log/codex-tui.log`) only to clear stale alerts when the approval/command flow advances. This avoids pseudo-terminal rendering issues and avoids heuristic false positives from normal command logs.
 
@@ -63,7 +63,7 @@ The installer:
 
 - Copies `codex-approval-notifier.sh` to `${HOME}/.local/bin/codex-approval-notifier`.
 - Adds a managed `codex()` shell wrapper to `~/.zshrc` or `~/.bashrc`.
-- Enables `codex_hooks` and adds a managed `PermissionRequest` hook to `~/.codex/config.toml`.
+- Enables `hooks` and adds a managed `PermissionRequest` hook to `~/.codex/config.toml`.
 - On WSL, installs the Windows toast AppUserModelID when WinRT is available.
 - Creates a backup of the shell rc before editing it.
 
@@ -105,7 +105,7 @@ The reliable approval signal is the Codex `PermissionRequest` hook:
 
 ```toml
 [features]
-codex_hooks = true
+hooks = true
 
 [[hooks.PermissionRequest]]
 matcher = "^Bash$"

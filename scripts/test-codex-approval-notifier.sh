@@ -506,7 +506,7 @@ CONFIG
     "$installed_path" --install-hook
   )"
   printf '%s' "$output" | grep -q 'installed PermissionRequest hook' || fail "--install-hook did not report success"
-  grep -q 'codex_hooks = true' "$config_file" || fail "--install-hook did not enable codex_hooks"
+  grep -q 'hooks = true' "$config_file" || fail "--install-hook did not enable hooks feature flag"
   grep -Fq '[[hooks.PermissionRequest]]' "$config_file" || fail "--install-hook did not add PermissionRequest hook"
   grep -Fq "${installed_path} --hook-permission-request" "$config_file" || fail "--install-hook command path mismatch"
 

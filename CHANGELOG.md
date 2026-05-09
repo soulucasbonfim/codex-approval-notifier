@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.6 - 2026-05-09
+
+- Migrate managed feature flag from deprecated `codex_hooks = true` to `hooks = true`.
+- Update hook install/validation logic to enforce `features.hooks`.
+- Update README and smoke test expectations for Codex `v0.130.0+`.
+
 ## 1.0.5 - 2026-04-27
 
 - Improve Linux notification behavior defaults for `notify-send` with `normal` urgency, transient mode, and 5-second expiration.

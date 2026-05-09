@@ -6,7 +6,7 @@ command_exists() {
   command -v "$1" >/dev/null 2>&1
 }
 
-CODEX_APPROVAL_NOTIFIER_VERSION="1.0.5"
+CODEX_APPROVAL_NOTIFIER_VERSION="1.0.6"
 
 need_cmd() {
   command_exists "$1" || {
@@ -557,39 +557,39 @@ remove_managed_hook_block() {
   mv "$tmp" "$path"
 }
 
-ensure_codex_hooks_feature() {
+ensure_hooks_feature() {
   local path="$1"
   local tmp
   tmp="${path}.codex-alert.tmp.$$"
 
   awk '
-    BEGIN { in_features=0; saw_features=0; saw_codex_hooks=0 }
+    BEGIN { in_features=0; saw_features=0; saw_hooks=0 }
     /^\[features\][[:space:]]*$/ {
-      if (in_features && !saw_codex_hooks) print "codex_hooks = true";
+      if (in_features && !saw_hooks) print "hooks = true";
       in_features=1;
       saw_features=1;
-      saw_codex_hooks=0;
+      saw_hooks=0;
       print;
       next;
     }
     /^\[/ {
-      if (in_features && !saw_codex_hooks) print "codex_hooks = true";
+      if (in_features && !saw_hooks) print "hooks = true";
       in_features=0;
       print;
       next;
     }
-    in_features && /^[[:space:]]*codex_hooks[[:space:]]*=/ {
-      print "codex_hooks = true";
-      saw_codex_hooks=1;
+    in_features && /^[[:space:]]*(codex_hooks|hooks)[[:space:]]*=/ {
+      print "hooks = true";
+      saw_hooks=1;
       next;
     }
     { print }
     END {
-      if (in_features && !saw_codex_hooks) print "codex_hooks = true";
+      if (in_features && !saw_hooks) print "hooks = true";
       if (!saw_features) {
         print "";
         print "[features]";
-        print "codex_hooks = true";
+        print "hooks = true";
       }
     }
   ' "$path" >"$tmp"
@@ -617,7 +617,7 @@ EOF
 
 validate_codex_hook_config() {
   [[ -f "$CODEX_CONFIG_FILE" ]] || return 1
-  grep -Eq '^[[:space:]]*codex_hooks[[:space:]]*=[[:space:]]*true[[:space:]]*$' "$CODEX_CONFIG_FILE" || return 1
+  grep -Eq '^[[:space:]]*hooks[[:space:]]*=[[:space:]]*true[[:space:]]*$' "$CODEX_CONFIG_FILE" || return 1
   grep -Fq '[[hooks.PermissionRequest]]' "$CODEX_CONFIG_FILE" || return 1
   grep -Fq "${ALERT_INSTALLED_PATH} --hook-permission-request" "$CODEX_CONFIG_FILE" || return 1
 }
@@ -627,7 +627,7 @@ install_hook_command() {
   touch "$CODEX_CONFIG_FILE"
   cp "$CODEX_CONFIG_FILE" "${CODEX_CONFIG_FILE}.codex-alert.bak.$(date +%Y%m%d-%H%M%S)"
   remove_managed_hook_block "$CODEX_CONFIG_FILE"
-  ensure_codex_hooks_feature "$CODEX_CONFIG_FILE"
+  ensure_hooks_feature "$CODEX_CONFIG_FILE"
   append_codex_hook_block "$CODEX_CONFIG_FILE"
   printf 'installed PermissionRequest hook in %s\n' "$CODEX_CONFIG_FILE"
 }
